@@ -79,13 +79,16 @@ export const uploadKnowledge = async (
             characterCount: chunk.length,
             sourceType: processed.fileType,
             originalName: knowledge.originalName,
+            pageNumber: processed.chunkPageNumbers ? processed.chunkPageNumbers[index] : 1,
             embeddingStatus: "pending",
           })
         )
 
-        if (chunkDocuments.length > 0) {
-          await KnowledgeChunk.insertMany(chunkDocuments)
+        if (chunkDocuments.length === 0) {
+          throw new Error("Document contains no readable text content.")
         }
+
+        await KnowledgeChunk.insertMany(chunkDocuments)
 
         knowledge.chunks = chunkDocuments.length
         knowledge.characters = processed.characters

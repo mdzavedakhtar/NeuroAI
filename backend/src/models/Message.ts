@@ -9,6 +9,7 @@ export interface IMessageSource {
   fileName: string
   chunkIndex: number
   score: number
+  pageNumber?: number
   knowledgeId?: string
 }
 
@@ -51,6 +52,11 @@ const messageSourceSchema = new Schema(
     knowledgeId: {
       type: String,
       default: "",
+    },
+
+    pageNumber: {
+      type: Number,
+      default: 1,
     },
   },
   {

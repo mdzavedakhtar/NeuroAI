@@ -66,6 +66,7 @@ type KnowledgeChunkForPinecone = {
   userId: string
   chunkIndex: number
   originalName: string
+  pageNumber?: number
 }
 
 
@@ -103,6 +104,7 @@ export const upsertKnowledgeChunks = async (
       userId: chunk.userId,
       chunkIndex: chunk.chunkIndex,
       originalName: chunk.originalName,
+      pageNumber: chunk.pageNumber ?? 1,
 
       source: "knowledge",
     }))
@@ -208,6 +210,9 @@ export const indexKnowledgeDocument = async (
 
         originalName:
           chunk.originalName,
+
+        pageNumber:
+          chunk.pageNumber,
       }))
 
 
@@ -337,6 +342,7 @@ export type KnowledgeSearchResult = {
   userId: string
   chunkIndex: number
   originalName: string
+  pageNumber: number
   source: string
 }
 
@@ -346,6 +352,7 @@ type PineconeKnowledgeFields = {
   userId?: string
   chunkIndex?: number
   originalName?: string
+  pageNumber?: number
   source?: string
 }
 
@@ -367,6 +374,8 @@ export const searchKnowledge = async ({
   if (!cleanQuery) {
     throw new Error("Search query is required")
   }
+
+  console.log(`[RETRIEVAL] Initiating vector search. User: ${userId}, Document ID Filter: ${knowledgeId || "None"}, TopK: ${topK}`)
 
   const index = await getPineconeIndex()
 
@@ -404,6 +413,7 @@ export const searchKnowledge = async ({
       "userId",
       "chunkIndex",
       "originalName",
+      "pageNumber",
       "source",
     ],
   })
@@ -414,6 +424,7 @@ export const searchKnowledge = async ({
   // ----------------------------------------------------
 
   const hits = response.result?.hits ?? []
+  console.log(`[RETRIEVAL] Vector search completed. Total hits found: ${hits.length}`)
 
 
   // ----------------------------------------------------
@@ -459,6 +470,11 @@ export const searchKnowledge = async ({
             ? fields.originalName
             : "",
 
+        pageNumber:
+          typeof fields.pageNumber === "number"
+            ? fields.pageNumber
+            : 1,
+
         source:
           typeof fields.source === "string"
             ? fields.source
@@ -466,6 +482,10 @@ export const searchKnowledge = async ({
       }
     })
 
+  if (results.length > 0) {
+    const matchedDocs = Array.from(new Set(results.map(r => r.knowledgeId)))
+    console.log(`[RETRIEVAL] Retrieved chunks map to Document IDs: [${matchedDocs.join(", ")}]`)
+  }
 
   return results
 }
@@ -494,6 +514,8 @@ export const buildKnowledgeContext = (
           result.originalName ||
           "Unknown document"
         }`,
+
+        `Page: ${result.pageNumber || 1}`,
 
         `Chunk: ${result.chunkIndex}`,
 

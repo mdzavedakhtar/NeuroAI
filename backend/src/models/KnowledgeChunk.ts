@@ -25,6 +25,7 @@ export interface IKnowledgeChunk extends Document {
   vectorId?: string
   embeddingStatus: EmbeddingStatus
   embeddingError?: string
+  pageNumber?: number
 
   createdAt: Date
   updatedAt: Date
@@ -74,6 +75,12 @@ const knowledgeChunkSchema =
         type: String,
         required: true,
         trim: true,
+      },
+
+      pageNumber: {
+        type: Number,
+        required: false,
+        default: 1,
       },
 
       vectorId: {

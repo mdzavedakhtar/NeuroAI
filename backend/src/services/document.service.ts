@@ -6,6 +6,7 @@ import { PDFParse } from "pdf-parse"
 export interface ProcessedDocument {
   text: string
   chunks: string[]
+  chunkPageNumbers: number[]
   characters: number
   pages: number
   fileType: string
@@ -64,7 +65,6 @@ function createChunks(
 export async function processPDF(
   filePath: string
 ): Promise<ProcessedDocument> {
-
   const buffer = fs.readFileSync(filePath)
 
   const parser = new PDFParse({
@@ -73,15 +73,46 @@ export async function processPDF(
 
   try {
     const result = await parser.getText()
+    const text = (result.text || "").trim()
 
-    const text = result.text.trim()
-    const chunks = createChunks(text)
+    const chunks: string[] = []
+    const chunkPageNumbers: number[] = []
+
+    if (Array.isArray(result.pages) && result.pages.length > 0) {
+      result.pages.forEach((page: any) => {
+        const pageText = (page.text || "").trim()
+        if (!pageText) return
+
+        const pageChunks = createChunks(pageText)
+        pageChunks.forEach((chunk) => {
+          chunks.push(chunk)
+          chunkPageNumbers.push(page.num || 1)
+        })
+      });
+    } else {
+      // Fallback if pages structure is unexpected
+      const rawChunks = createChunks(text)
+      rawChunks.forEach((chunk) => {
+        chunks.push(chunk)
+        chunkPageNumbers.push(1)
+      })
+    }
+
+    // In case no text/chunks were extracted from pages but document isn't empty
+    if (chunks.length === 0 && text) {
+      const rawChunks = createChunks(text)
+      rawChunks.forEach((chunk) => {
+        chunks.push(chunk)
+        chunkPageNumbers.push(1)
+      })
+    }
 
     return {
       text,
       chunks,
+      chunkPageNumbers,
       characters: text.length,
-      pages: result.total,
+      pages: result.total || 1,
       fileType: "pdf",
     }
   } finally {
@@ -99,13 +130,19 @@ export async function processDOCX(
   const buffer = fs.readFileSync(filePath)
 
   const result = await mammoth.extractRawText({ buffer })
-
   const text = result.value.trim()
   const chunks = createChunks(text)
+
+  // Generate page estimates based on chunk progress
+  const chunkPageNumbers = chunks.map((_, index) => {
+    // Standard page is ~3000 characters. Each chunk is ~1000 characters.
+    return Math.max(1, Math.ceil(((index * 800) + 1) / 3000))
+  })
 
   return {
     text,
     chunks,
+    chunkPageNumbers,
     characters: text.length,
     pages: Math.max(1, Math.ceil(text.length / 3000)),
     fileType: "docx",
@@ -122,55 +159,74 @@ export async function processXLSX(
   const workbook = XLSX.readFile(filePath)
 
   let fullText = ""
+  const chunks: string[] = []
+  const chunkPageNumbers: number[] = []
 
-  workbook.SheetNames.forEach((sheetName) => {
+  workbook.SheetNames.forEach((sheetName, index) => {
     const sheet = workbook.Sheets[sheetName]
-    const csv = XLSX.utils.sheet_to_csv(sheet, { blankrows: false })
-    if (csv.trim()) {
-      fullText += `\n\n=== Sheet: ${sheetName} ===\n${csv}`
+    const csv = XLSX.utils.sheet_to_csv(sheet, { blankrows: false }).trim()
+    
+    if (csv) {
+      const header = `=== Sheet: ${sheetName} ===\n`
+      fullText += `\n\n${header}${csv}`
+
+      const sheetChunks = createChunks(csv)
+      sheetChunks.forEach((chunk) => {
+        chunks.push(`${header}${chunk}`)
+        chunkPageNumbers.push(index + 1) // Sheet index starting from 1
+      })
     }
   })
 
   const text = fullText.trim()
-  const chunks = createChunks(text)
 
   return {
     text,
     chunks,
+    chunkPageNumbers,
     characters: text.length,
-    pages: workbook.SheetNames.length,
+    pages: workbook.SheetNames.length || 1,
     fileType: "xlsx",
   }
 }
 
 // ======================================================
-// PPTX (basic text extraction via XLSX utility)
+// PPTX
 // ======================================================
 
 export async function processPPTX(
   filePath: string
 ): Promise<ProcessedDocument> {
-  // PPTX is a ZIP file; use XLSX to extract slide text
   const workbook = XLSX.readFile(filePath)
 
   let fullText = ""
+  const chunks: string[] = []
+  const chunkPageNumbers: number[] = []
 
-  workbook.SheetNames.forEach((sheetName) => {
+  workbook.SheetNames.forEach((sheetName, index) => {
     const sheet = workbook.Sheets[sheetName]
-    const text = XLSX.utils.sheet_to_txt(sheet)
-    if (text.trim()) {
-      fullText += `\n\n=== Slide: ${sheetName} ===\n${text}`
+    const slideText = XLSX.utils.sheet_to_txt(sheet).trim()
+    
+    if (slideText) {
+      const header = `=== Slide: ${sheetName} ===\n`
+      fullText += `\n\n${header}${slideText}`
+
+      const slideChunks = createChunks(slideText)
+      slideChunks.forEach((chunk) => {
+        chunks.push(`${header}${chunk}`)
+        chunkPageNumbers.push(index + 1) // Slide index starting from 1
+      })
     }
   })
 
   const text = fullText.trim()
-  const chunks = createChunks(text)
 
   return {
     text,
     chunks,
+    chunkPageNumbers,
     characters: text.length,
-    pages: workbook.SheetNames.length,
+    pages: workbook.SheetNames.length || 1,
     fileType: "pptx",
   }
 }
@@ -183,30 +239,27 @@ export async function processDocument(
   filePath: string,
   mimeType: string
 ): Promise<ProcessedDocument> {
+  console.log(`[INGESTION] Processing document file: ${filePath} (${mimeType})`)
+  
+  let processed: ProcessedDocument
   if (mimeType === "application/pdf") {
-    return processPDF(filePath)
-  }
-
-  if (
-    mimeType ===
-    "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    processed = await processPDF(filePath)
+  } else if (
+    mimeType === "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
   ) {
-    return processDOCX(filePath)
-  }
-
-  if (
-    mimeType ===
-    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    processed = await processDOCX(filePath)
+  } else if (
+    mimeType === "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
   ) {
-    return processXLSX(filePath)
-  }
-
-  if (
-    mimeType ===
-    "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+    processed = await processXLSX(filePath)
+  } else if (
+    mimeType === "application/vnd.openxmlformats-officedocument.presentationml.presentation"
   ) {
-    return processPPTX(filePath)
+    processed = await processPPTX(filePath)
+  } else {
+    throw new Error(`Unsupported file type: ${mimeType}`)
   }
 
-  throw new Error(`Unsupported file type: ${mimeType}`)
+  console.log(`[INGESTION] Document processing completed. Type: ${processed.fileType}, Chunks: ${processed.chunks.length}, Characters: ${processed.characters}`)
+  return processed
 }

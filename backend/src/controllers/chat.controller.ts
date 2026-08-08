@@ -378,6 +378,7 @@ if (recentDuplicate) {
         topK: 8,
       })
       context = buildKnowledgeContext(results)
+      console.log(`[RAG] Retrieved ${results.length} chunk(s) for context assembly.`)
     }
 
     // --------------------------------------------------
@@ -388,15 +389,18 @@ if (recentDuplicate) {
 
     if (!conversation.knowledgeId) {
       // General conversation
+      console.log(`[LLM] Generating general answer (no document context).`)
       answer = await generateRagAnswer({
         question: cleanMessage,
         context: "",
       })
     } else if (!context.trim()) {
-      // PDF grounded chat but no relevant context chunks
+      // Knowledge base attached but no relevant chunks found
+      console.log(`[LLM] No relevant chunks found for query. Returning fallback.`)
       answer = "I could not find relevant information in the uploaded knowledge base."
     } else {
-      // PDF grounded chat with retrieved context
+      // Grounded RAG answer
+      console.log(`[LLM] Generating grounded answer from ${results.length} retrieved chunk(s).`)
       answer = await generateRagAnswer({
         question: cleanMessage,
         context,
@@ -407,24 +411,16 @@ if (recentDuplicate) {
     // BUILD SOURCES
     // --------------------------------------------------
 
-    const sources =
-      results.map(
-        (result, index) => ({
-          sourceNumber: index + 1,
-
-          fileName:
-            result.originalName,
-
-          chunkIndex:
-            result.chunkIndex,
-
-          score:
-            result.score,
-
-          knowledgeId:
-            result.knowledgeId,
-        })
-      )
+    const sources = results.map(
+      (result, index) => ({
+        sourceNumber: index + 1,
+        fileName:    result.originalName,
+        chunkIndex:  result.chunkIndex,
+        pageNumber:  result.pageNumber ?? 1,
+        score:       result.score,
+        knowledgeId: result.knowledgeId,
+      })
+    )
 
     // --------------------------------------------------
     // SAVE AI MESSAGE
@@ -582,13 +578,15 @@ export const sendChatMessageStream = async (
         topK: 8,
       })
       context = buildKnowledgeContext(results)
+      console.log(`[RAG] Retrieved ${results.length} chunk(s) for context assembly.`)
     }
 
     const sources = results.map((result, index) => ({
       sourceNumber: index + 1,
-      fileName: result.originalName,
-      chunkIndex: result.chunkIndex,
-      score: result.score,
+      fileName:    result.originalName,
+      chunkIndex:  result.chunkIndex,
+      pageNumber:  result.pageNumber ?? 1,
+      score:       result.score,
       knowledgeId: result.knowledgeId,
     }))
 
@@ -605,14 +603,17 @@ export const sendChatMessageStream = async (
     let responseStream
 
     if (!conversation.knowledgeId) {
+      console.log(`[LLM] Generating general answer (no document context).`)
       responseStream = await generateRagAnswerStream({
         question: cleanMessage,
         context: "",
         model,
       })
     } else if (!context.trim()) {
+      console.log(`[LLM] No relevant chunks found for query. Returning fallback.`)
       answer = "I could not find enough information in the uploaded documents to answer this question."
     } else {
+      console.log(`[LLM] Generating grounded answer from ${results.length} retrieved chunk(s).`)
       responseStream = await generateRagAnswerStream({
         question: cleanMessage,
         context,
@@ -627,8 +628,9 @@ export const sendChatMessageStream = async (
           answer += chunkText
           res.write(`data: ${JSON.stringify({ type: "content", text: chunkText })}\n\n`)
         }
+        console.log(`[LLM] Stream generation complete. Answer length: ${answer.length} chars.`)
       } catch (streamError) {
-        console.error("Gemini stream error:", streamError)
+        console.error("[LLM] Gemini stream error:", streamError)
         res.write(`data: ${JSON.stringify({ type: "error", message: "Stream generation error" })}\n\n`)
       }
     } else if (answer) {
