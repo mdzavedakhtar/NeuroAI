@@ -271,3 +271,192 @@ export const getMe = async (
     })
   }
 }
+
+/*
+|--------------------------------------------------------------------------
+| Update Profile
+|--------------------------------------------------------------------------
+| PUT /api/auth/me
+| Protected Route
+*/
+
+export const updateProfile = async (
+  req: Request,
+  res: Response
+): Promise<void> => {
+  try {
+    const authRequest = req as import("../middleware/auth.middleware").AuthRequest
+
+    if (!authRequest.user) {
+      res.status(401).json({
+        success: false,
+        message: "Authentication required",
+      })
+      return
+    }
+
+    const userId = authRequest.user.id
+    const { name, avatar } = req.body
+
+    if (
+      name !== undefined &&
+      (typeof name !== "string" || !name.trim() || name.trim().length < 2)
+    ) {
+      res.status(400).json({
+        success: false,
+        message: "Name must be at least 2 characters",
+      })
+      return
+    }
+
+    if (
+      avatar !== undefined &&
+      (typeof avatar !== "string" || avatar.length > 500)
+    ) {
+      res.status(400).json({
+        success: false,
+        message: "Avatar must be a valid image URL",
+      })
+      return
+    }
+
+    const user = await User.findById(userId)
+
+    if (!user) {
+      res.status(404).json({
+        success: false,
+        message: "User not found",
+      })
+      return
+    }
+
+    if (name !== undefined) {
+      user.name = name.trim()
+    }
+
+    if (avatar !== undefined) {
+      user.avatar = avatar.trim()
+    }
+
+    await user.save()
+
+    res.status(200).json({
+      success: true,
+      message: "Profile updated successfully",
+      user: {
+        id: user._id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+        avatar: user.avatar,
+        isEmailVerified: user.isEmailVerified,
+      },
+    })
+  } catch (error) {
+    console.error("Update profile error:", error)
+
+    res.status(500).json({
+      success: false,
+      message: "Unable to update profile",
+    })
+  }
+}
+
+/*
+|--------------------------------------------------------------------------
+| Change Password
+|--------------------------------------------------------------------------
+| PUT /api/auth/password
+| Protected Route
+*/
+
+export const changePassword = async (
+  req: Request,
+  res: Response
+): Promise<void> => {
+  try {
+    const authRequest = req as import("../middleware/auth.middleware").AuthRequest
+
+    if (!authRequest.user) {
+      res.status(401).json({
+        success: false,
+        message: "Authentication required",
+      })
+      return
+    }
+
+    const { currentPassword, newPassword } = req.body
+
+    if (typeof currentPassword !== "string" || !currentPassword) {
+      res.status(400).json({
+        success: false,
+        message: "Current password is required",
+      })
+      return
+    }
+
+    if (
+      typeof newPassword !== "string" ||
+      newPassword.length < 8
+    ) {
+      res.status(400).json({
+        success: false,
+        message: "New password must be at least 8 characters",
+      })
+      return
+    }
+
+    if (newPassword === currentPassword) {
+      res.status(400).json({
+        success: false,
+        message: "New password must be different from the current password",
+      })
+      return
+    }
+
+    // Password has select:false, so +password is required here.
+    const user = await User.findById(authRequest.user.id).select("+password")
+
+    if (!user) {
+      res.status(404).json({
+        success: false,
+        message: "User not found",
+      })
+      return
+    }
+
+    // Google-only accounts have no password set.
+    if (user.authProvider === "google" && !user.password) {
+      res.status(400).json({
+        success: false,
+        message: "Password cannot be changed for Google-linked accounts",
+      })
+      return
+    }
+
+    const passwordMatches = await user.comparePassword(currentPassword)
+
+    if (!passwordMatches) {
+      res.status(401).json({
+        success: false,
+        message: "Current password is incorrect",
+      })
+      return
+    }
+
+    user.password = newPassword
+    await user.save()
+
+    res.status(200).json({
+      success: true,
+      message: "Password changed successfully",
+    })
+  } catch (error) {
+    console.error("Change password error:", error)
+
+    res.status(500).json({
+      success: false,
+      message: "Unable to change password",
+    })
+  }
+}

@@ -1,5 +1,6 @@
-﻿export type KnowledgeDocument = {
+export type KnowledgeDocument = {
   _id: string
+  id?: string
   userId?: string
   originalName?: string
   fileName?: string
@@ -21,6 +22,7 @@ export type KnowledgeUploadResponse = {
   message?: string
 
   _id?: string
+  id?: string
   originalName?: string
   fileName?: string
   filename?: string

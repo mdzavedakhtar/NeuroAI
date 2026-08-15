@@ -73,6 +73,72 @@ export async function register(
   return result
 }
 
+export async function updateProfile(
+  payload: {
+    name?: string
+    avatar?: string
+  }
+) {
+  const result =
+    await apiFetch<{
+      success: boolean
+      message: string
+      user?: {
+        id?: string
+        name?: string
+        email?: string
+        avatar?: string
+        role?: string
+      }
+    }>("/auth/me", {
+      method: "PUT",
+      body: JSON.stringify(payload),
+    })
+
+  if (
+    typeof window !== "undefined" &&
+    result.user
+  ) {
+    const stored = localStorage.getItem(
+      "neurostack_user"
+    )
+
+    let current: Record<string, unknown> = {}
+
+    if (stored) {
+      try {
+        current = JSON.parse(stored)
+      } catch {
+        // ignore
+      }
+    }
+
+    localStorage.setItem(
+      "neurostack_user",
+      JSON.stringify({
+        ...current,
+        name: result.user.name ?? current.name,
+        avatar: result.user.avatar ?? current.avatar,
+      })
+    )
+  }
+
+  return result
+}
+
+export async function changePassword(payload: {
+  currentPassword: string
+  newPassword: string
+}) {
+  return apiFetch<{
+    success: boolean
+    message: string
+  }>("/auth/password", {
+    method: "PUT",
+    body: JSON.stringify(payload),
+  })
+}
+
 export function logout() {
   removeToken()
 

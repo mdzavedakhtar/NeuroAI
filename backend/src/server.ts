@@ -8,8 +8,10 @@ import mongoose from "mongoose"
 import authRoutes from "./routes/auth.routes"
 import knowledgeRoutes from "./routes/knowledge.routes"
 import chatRoutes from "./routes/chat.routes"
+import graphRoutes from "./routes/graph.routes"
 
 import { connectDatabase } from "./config/database"
+import { verifyNeo4jConnection, createGraphIndexes, closeNeo4jDriver } from "./config/neo4j"
 
 dotenv.config()
 
@@ -46,18 +48,41 @@ app.get("/api/health", (_req, res) => {
 app.use("/api/auth", authRoutes)
 app.use("/api/knowledge", knowledgeRoutes)
 app.use("/api/chat", chatRoutes)
+app.use("/api/graph", graphRoutes)
 
 // Start Server
 async function startServer() {
   await connectDatabase()
 
-  app.listen(PORT, () => {
+  // Initialize Neo4j Graph DB
+  try {
+    await verifyNeo4jConnection()
+    await createGraphIndexes()
+  } catch (error) {
+    console.warn("⚠️ Neo4j connection initialization failed:", (error as Error).message)
+    console.warn("Graph DB features will be offline.")
+  }
+
+  const server = app.listen(PORT, () => {
     console.log("")
     console.log("🚀 NeuroStack AI Backend")
     console.log(`🌐 Server: http://localhost:${PORT}`)
     console.log(`❤️ Health: http://localhost:${PORT}/api/health`)
     console.log("")
   })
+
+  // Graceful shutdown
+  const shutdown = async () => {
+    console.log("\nStopping server gracefully...")
+    server.close(async () => {
+      await closeNeo4jDriver()
+      console.log("Server stopped.")
+      process.exit(0)
+    })
+  }
+
+  process.on("SIGINT", shutdown)
+  process.on("SIGTERM", shutdown)
 }
 
 startServer()

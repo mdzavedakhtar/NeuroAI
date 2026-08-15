@@ -4,10 +4,11 @@ import {
   getMe,
   loginUser,
   registerUser,
+  updateProfile,
+  changePassword,
 } from "../controllers/auth.controller"
 
 import { protect } from "../middleware/auth.middleware"
-import { authorizeRoles } from "../middleware/role.middleware"
 
 const router = Router()
 
@@ -15,20 +16,9 @@ const router = Router()
 router.post("/register", registerUser)
 router.post("/login", loginUser)
 
-// Protected user route
+// Protected user routes
 router.get("/me", protect, getMe)
-
-// Temporary RBAC test route
-router.get(
-  "/admin-test",
-  protect,
-  authorizeRoles("admin"),
-  (req, res) => {
-    res.status(200).json({
-      success: true,
-      message: "Admin access granted",
-    })
-  }
-)
+router.put("/me", protect, updateProfile)
+router.put("/password", protect, changePassword)
 
 export default router

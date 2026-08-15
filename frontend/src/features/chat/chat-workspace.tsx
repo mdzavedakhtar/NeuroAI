@@ -3,7 +3,6 @@
 import { useEffect, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
 import {
-  Bot,
   Check,
   ChevronDown,
   Copy,
@@ -11,12 +10,11 @@ import {
   FileText,
   Loader2,
   LogOut,
-  Menu,
   Paperclip,
-  Plus,
   Send,
+  Settings,
+  Share2,
   Trash2,
-  User,
   X,
 } from "lucide-react"
 import ReactMarkdown from "react-markdown"
@@ -78,7 +76,7 @@ export function ChatWorkspace() {
   const [streamingMsgId, setStreamingMsgId] = useState<string | null>(null)
   const [streamingSources, setStreamingSources] = useState<any[]>([])
 
-  const [activeModel, setActiveModel] = useState<string>("gemini-3.6-flash")
+  const [activeModel, setActiveModel] = useState<string>("gemini-2.5-flash")
   const abortControllerRef = useRef<AbortController | null>(null)
 
   const bottomRef = useRef<HTMLDivElement>(null)
@@ -411,7 +409,7 @@ export function ChatWorkspace() {
     const sevenDaysAgo = new Date(today.getTime() - 7 * 24 * 60 * 60 * 1000)
 
     conversations.forEach((conv) => {
-      const date = new Date(conv.updatedAt || conv.createdAt)
+      const date = new Date(conv.updatedAt || conv.createdAt || "")
       if (date >= today) {
         groups.Today.push(conv)
       } else if (date >= yesterday) {
@@ -537,6 +535,24 @@ export function ChatWorkspace() {
 
         {/* Sidebar Footer */}
         <div className="border-t border-white/[0.08] p-2 space-y-0.5">
+          {/* Graph Explorer */}
+          <button
+            onClick={() => router.push("/dashboard/graph")}
+            className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-[#8e8e8e] hover:bg-white/5 hover:text-[#ececec] transition-colors text-[13.5px]"
+          >
+            <Share2 className="size-4 shrink-0" />
+            <span>Graph Explorer</span>
+          </button>
+
+          {/* Settings */}
+          <button
+            onClick={() => router.push("/dashboard/settings")}
+            className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-[#8e8e8e] hover:bg-white/5 hover:text-[#ececec] transition-colors text-[13.5px]"
+          >
+            <Settings className="size-4 shrink-0" />
+            <span>Settings</span>
+          </button>
+
           {/* Document Library */}
           <button
             onClick={() => setDocModalOpen(true)}
@@ -602,28 +618,28 @@ export function ChatWorkspace() {
             {/* Model Selector Dropdown */}
             <DropdownMenu>
               <DropdownMenuTrigger className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl hover:bg-white/5 transition-colors text-[14px] font-semibold text-[#8e8e8e] hover:text-[#ececec] bg-transparent border-0 outline-none cursor-pointer">
-                <span>{activeModel === "gemini-3.6-flash" ? "Gemini 2.0 Flash" : "Gemini 1.5 Pro"}</span>
+                <span>{activeModel === "gemini-2.5-flash" ? "Gemini 2.5 Flash" : "Gemini 2.5 Pro"}</span>
                 <ChevronDown className="size-3.5" />
               </DropdownMenuTrigger>
               <DropdownMenuContent className="w-52 bg-[#2f2f2f] border-white/10 text-[#ececec] p-1 rounded-xl shadow-2xl z-50">
                 <DropdownMenuItem
-                  onClick={() => setActiveModel("gemini-3.6-flash")}
+                  onClick={() => setActiveModel("gemini-2.5-flash")}
                   className={cn(
                     "flex flex-col items-start gap-0.5 px-3 py-2 rounded-lg cursor-pointer text-[13px] hover:bg-white/5 focus:bg-white/5",
-                    activeModel === "gemini-3.6-flash" && "bg-white/5 text-[#ececec]"
+                    activeModel === "gemini-2.5-flash" && "bg-white/5 text-[#ececec]"
                   )}
                 >
-                  <span className="font-semibold text-[13px]">Gemini 2.0 Flash</span>
+                  <span className="font-semibold text-[13px]">Gemini 2.5 Flash</span>
                   <span className="text-[10px] text-[#8e8e8e] leading-tight mt-0.5">High speed general reasoning & coding</span>
                 </DropdownMenuItem>
                 <DropdownMenuItem
-                  onClick={() => setActiveModel("gemini-1.5-pro")}
+                  onClick={() => setActiveModel("gemini-2.5-pro")}
                   className={cn(
                     "flex flex-col items-start gap-0.5 px-3 py-2 rounded-lg cursor-pointer text-[13px] hover:bg-white/5 focus:bg-white/5",
-                    activeModel === "gemini-1.5-pro" && "bg-white/5 text-[#ececec]"
+                    activeModel === "gemini-2.5-pro" && "bg-white/5 text-[#ececec]"
                   )}
                 >
-                  <span className="font-semibold text-[13px]">Gemini 1.5 Pro</span>
+                  <span className="font-semibold text-[13px]">Gemini 2.5 Pro</span>
                   <span className="text-[10px] text-[#8e8e8e] leading-tight mt-0.5">Complex logic, coding and deep analysis</span>
                 </DropdownMenuItem>
               </DropdownMenuContent>

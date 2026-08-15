@@ -7,10 +7,6 @@ import {
 } from "../controllers/knowledge.controller"
 
 import {
-  askKnowledge,
-} from "../controllers/rag.controller"
-
-import {
   protect,
 } from "../middleware/auth.middleware"
 
@@ -19,7 +15,6 @@ import {
 } from "../middleware/upload.middleware"
 
 import {
-  testPineconeUpsert,
   indexKnowledgeDocument,
 } from "../services/pinecone.service"
 
@@ -57,35 +52,6 @@ router.delete(
 )
 
 // ======================================================
-// PINECONE CONNECTION TEST
-// ======================================================
-
-router.post(
-  "/pinecone-test",
-  async (_req, res) => {
-    try {
-      const result =
-        await testPineconeUpsert()
-
-      res.status(200).json(result)
-    } catch (error) {
-      console.error(
-        "Pinecone test error:",
-        error
-      )
-
-      res.status(500).json({
-        success: false,
-        message:
-          error instanceof Error
-            ? error.message
-            : "Pinecone test failed",
-      })
-    }
-  }
-)
-
-// ======================================================
 // INDEX KNOWLEDGE DOCUMENT
 // ======================================================
 
@@ -119,16 +85,6 @@ router.post(
       })
     }
   }
-)
-
-// ======================================================
-// ASK NEUROSTACK AI
-// ======================================================
-
-router.post(
-  "/ask",
-  protect,
-  askKnowledge
 )
 
 export default router

@@ -6,6 +6,8 @@ import KnowledgeChunk from "../models/KnowledgeChunk"
 import { AuthRequest } from "../middleware/auth.middleware"
 import { processDocument } from "../services/document.service"
 import { getPineconeIndex } from "../services/pinecone.service"
+import { ingestChunksToGraph } from "../services/graph.ingestion.service"
+import { deleteGraphForKnowledge } from "../services/neo4j.service"
 
 export const uploadKnowledge = async (
   req: AuthRequest,
@@ -90,7 +92,32 @@ export const uploadKnowledge = async (
 
         await KnowledgeChunk.insertMany(chunkDocuments)
 
-        knowledge.chunks = chunkDocuments.length
+        // --------------------------------------------------
+        // GRAPH INGESTION (fire-and-forget — never blocks upload)
+        // --------------------------------------------------
+
+        const savedChunks = await KnowledgeChunk.find({
+          knowledgeId: knowledge._id,
+        }).select("_id chunkIndex content pageNumber").lean()
+
+        ingestChunksToGraph(
+          savedChunks.map((c) => ({
+            chunkId:    c._id.toString(),
+            chunkIndex: c.chunkIndex,
+            content:    c.content,
+            pageNumber: c.pageNumber ?? 1,
+          })),
+          {
+            documentId: knowledge._id.toString(),
+            userId:     req.user!.id,
+            fileName:   knowledge.originalName,
+            fileType:   processed.fileType,
+            uploadedAt: knowledge.createdAt?.toISOString() ?? new Date().toISOString(),
+          }
+        ).catch((err) =>
+          console.error("[GRAPH] Background ingestion error:", err)
+        )
+
         knowledge.characters = processed.characters
         knowledge.status = "ready"
         knowledge.errorMessage = ""
@@ -225,7 +252,7 @@ export const deleteKnowledgeSource = async (
       return
     }
 
-    const { knowledgeId } = req.params
+    const knowledgeId = req.params.knowledgeId as string
 
     const knowledge = await Knowledge.findOne({
       _id: knowledgeId,
@@ -255,7 +282,14 @@ export const deleteKnowledgeSource = async (
       console.error("Failed to delete chunks from Pinecone:", pineconeErr)
     }
 
-    // 3. Delete physical file from disk (if exists)
+    // 3. Delete Neo4j graph nodes for this document
+    try {
+      await deleteGraphForKnowledge(knowledgeId, req.user!.id)
+    } catch (graphErr) {
+      console.error("[GRAPH] Failed to delete graph nodes:", graphErr)
+    }
+
+    // 4. Delete physical file from disk (if exists)
     if (knowledge.path) {
       try {
         await fs.unlink(knowledge.path)

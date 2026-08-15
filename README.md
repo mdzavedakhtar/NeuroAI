@@ -22,7 +22,14 @@
 ### 3. Advanced Conversation & Streaming Engine
 *   **Standard & Streaming Responses**: Messages can be requested normally or streamed word-by-word using **Server-Sent Events (SSE)** for a fast, responsive chat experience.
 *   **Conversation Persistence**: Conversations, individual user messages, and chunk links are stored and tracked in MongoDB.
-*   **Dynamic Model Switching**: Flexible mid-chat routing, supporting both standard models (`gemini-2.5-flash`) and logic-based pro overrides.
+*   **Dynamic Model Switching**: Flexible mid-chat routing between `gemini-2.5-flash` (fast) and `gemini-2.5-pro` (deep reasoning) models.
+
+### 5. Knowledge Graph Intelligence (Neo4j)
+*   **Automatic Entity Extraction**: On document upload, entities (people, organizations, technologies, projects, products, concepts, locations) are extracted and merged into a Neo4j knowledge graph.
+*   **Entity Relationships**: Connections such as `WORKS_AT`, `USES`, `CREATED`, `PART_OF`, `COMPETES_WITH` are inferred and stored between entities.
+*   **Natural-Language Graph Queries**: The **Graph Explorer** page turns plain questions into graph lookups, returning matched entities, relationship paths, and the source chunks that back each fact.
+*   **User-Isolated Namespaces**: Every node and relationship is scoped by `userId` and `documentId`, so each user only ever sees their own graph.
+*   **Resilient by Design**: If Neo4j is unreachable the server boots normally and the Graph Explorer surfaces a clear offline message instead of crashing.
 
 ### 4. Secure Authentication & User Isolation
 *   **Token Security**: Uses JSON Web Tokens (JWT) for secure authentication.
@@ -43,7 +50,7 @@
 ### Backend
 *   **Runtime & Framework**: Node.js & Express.js (TypeScript)
 *   **Execution**: Running dynamically using `tsx` (TypeScript Execute)
-*   **Databases**: MongoDB (via Mongoose) & Pinecone DB
+*   **Databases**: MongoDB (via Mongoose), Pinecone DB & Neo4j (knowledge graph)
 *   **Orchestration SDK**: Google Gemini GenAI SDK (`@google/genai` v2.15.0)
 *   **Security & Logs**: Helmet, CORS, Cookie Parser, Morgan logging, Multer file upload
 
@@ -68,11 +75,10 @@ NeuroStack-AI/
 ├── frontend/
 │   ├── src/
 │   │   ├── app/             # Next.js Pages (Landing, Login, Register, Dashboard)
-│   │   ├── components/      # Shared components (Sidebar, Chat window, Uploaders)
-│   │   ├── features/        # Modular UI (ai-tools, chat, analytics, settings, team)
-│   │   ├── hooks/           # Custom React hooks
-│   │   ├── services/        # API client integrations
-│   │   └── store/           # Frontend client-side state
+│   │   │   └── dashboard/   # Chat workspace, Graph Explorer, Settings
+│   │   ├── components/      # Shared components (UI kit, dashboard shell, headers)
+│   │   ├── features/        # Modular features (auth, chat, knowledge, graph, settings)
+│   │   └── services/        # API client integrations
 │   ├── package.json
 │   └── next.config.ts
 └── README.md                # Project overview and configuration documentation (this file)
@@ -92,15 +98,20 @@ NeuroStack-AI/
 1. Navigate to `backend/` and create a `.env` file:
    ```env
    PORT=5000
-   MONGO_URI=your_mongodb_connection_string
+   MONGODB_URI=your_mongodb_connection_string
    JWT_SECRET=your_jwt_secret_key
    FRONTEND_URL=http://localhost:3000
-   
+
    GEMINI_API_KEY=your_gemini_api_key
    GEMINI_MODEL=gemini-2.5-flash
-   
+
    PINECONE_API_KEY=your_pinecone_api_key
    PINECONE_INDEX_NAME=your_pinecone_index_name
+
+   # Neo4j Knowledge Graph (optional — Graph Explorer stays offline when absent)
+   NEO4J_URI=neo4j+s://your-instance.databases.neo4j.io
+   NEO4J_USERNAME=your_neo4j_username
+   NEO4J_PASSWORD=your_neo4j_password
    ```
 2. Install dependencies:
    ```bash
@@ -128,3 +139,23 @@ NeuroStack-AI/
    ```
 
 Open [http://localhost:3000](http://localhost:3000) to view the application.
+
+---
+
+## 📍 Dashboard Pages
+
+| Route | Purpose |
+| --- | --- |
+| `/dashboard` | Chat workspace — RAG conversations, PDF attach, document library, export |
+| `/dashboard/graph` | Graph Explorer — query entities/relationships extracted from your documents |
+| `/dashboard/settings` | Profile & password management |
+
+## 🔬 Verifying Neo4j Connectivity
+
+From `backend/`, run the self-cleaning connectivity script (creates, reads and deletes a test node):
+
+```bash
+node test_neo4j_ops.js
+```
+
+If it reports `No routing servers available`, your Neo4j AuraDB instance is paused or the credentials in `.env` are incorrect — resume the instance in the Neo4j Aura console and retry. The backend itself tolerates an offline graph and will log `Graph DB features will be offline.`.
