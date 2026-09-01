@@ -2,6 +2,12 @@ import { Request, Response } from "express"
 
 import User from "../models/User"
 import { generateToken } from "../utils/generateToken"
+import {
+  buildVerificationUrl,
+  generateVerificationToken,
+  hashVerificationToken,
+  sendVerificationEmail,
+} from "../utils/email"
 
 /*
 |--------------------------------------------------------------------------
@@ -80,6 +86,23 @@ export const registerUser = async (
       user.role
     )
 
+    // --------------------------------------------------
+    // EMAIL VERIFICATION
+    // --------------------------------------------------
+
+    const verificationToken = generateVerificationToken()
+
+    user.verificationToken = hashVerificationToken(verificationToken)
+    user.verificationTokenExpires = new Date(Date.now() + 24 * 60 * 60 * 1000)
+
+    await user.save()
+
+    const emailSent = await sendVerificationEmail({
+      to: user.email,
+      name: user.name,
+      token: verificationToken,
+    })
+
     res.status(201).json({
       success: true,
       message: "Account created successfully",
@@ -94,6 +117,13 @@ export const registerUser = async (
         avatar: user.avatar,
         isEmailVerified: user.isEmailVerified,
       },
+
+      verificationEmailSent: emailSent,
+
+      // Dev convenience — only returned when SMTP is not configured.
+      devVerificationUrl: emailSent
+        ? undefined
+        : buildVerificationUrl(verificationToken),
     })
   } catch (error) {
     console.error("Register error:", error)
@@ -182,6 +212,20 @@ export const loginUser = async (
       res.status(400).json({
         success: false,
         message: "Please continue with Google",
+      })
+      return
+    }
+
+    // Email verification gate (opt-in via REQUIRE_EMAIL_VERIFICATION=true)
+    if (
+      process.env.REQUIRE_EMAIL_VERIFICATION === "true" &&
+      user.authProvider === "local" &&
+      !user.isEmailVerified
+    ) {
+      res.status(403).json({
+        success: false,
+        message: "Please verify your email address before signing in",
+        requiresVerification: true,
       })
       return
     }
@@ -458,5 +502,317 @@ export const changePassword = async (
       success: false,
       message: "Unable to change password",
     })
+  }
+}
+
+/*
+|--------------------------------------------------------------------------
+| Verify Email
+|--------------------------------------------------------------------------
+| POST /api/auth/verify-email
+| Body: { token: string }
+| Public route
+*/
+
+export const verifyEmail = async (
+  req: Request,
+  res: Response
+): Promise<void> => {
+  try {
+    const { token } = req.body
+
+    if (typeof token !== "string" || !token.trim()) {
+      res.status(400).json({
+        success: false,
+        message: "Verification token is required",
+      })
+      return
+    }
+
+    const hashedToken = hashVerificationToken(token.trim())
+
+    const user = await User.findOne({
+      verificationToken: hashedToken,
+    }).select("+verificationToken +verificationTokenExpires")
+
+    if (!user) {
+      res.status(400).json({
+        success: false,
+        message: "Invalid or expired verification link",
+      })
+      return
+    }
+
+    if (
+      user.verificationTokenExpires &&
+      user.verificationTokenExpires.getTime() < Date.now()
+    ) {
+      res.status(400).json({
+        success: false,
+        message: "This verification link has expired. Request a new one.",
+      })
+      return
+    }
+
+    user.isEmailVerified = true
+    user.emailVerifiedAt = new Date()
+    user.verificationToken = undefined
+    user.verificationTokenExpires = undefined
+
+    await user.save()
+
+    res.status(200).json({
+      success: true,
+      message: "Email verified successfully. You can now sign in.",
+    })
+  } catch (error) {
+    console.error("Verify email error:", error)
+
+    res.status(500).json({
+      success: false,
+      message: "Unable to verify email",
+    })
+  }
+}
+
+/*
+|--------------------------------------------------------------------------
+| Resend Verification Email
+|--------------------------------------------------------------------------
+| POST /api/auth/resend-verification
+| Body: { email: string }
+| Public route — always returns a generic success to avoid user enumeration.
+*/
+
+export const resendVerification = async (
+  req: Request,
+  res: Response
+): Promise<void> => {
+  try {
+    const { email } = req.body
+
+    if (typeof email !== "string" || !email.trim()) {
+      res.status(400).json({
+        success: false,
+        message: "Email is required",
+      })
+      return
+    }
+
+    const user = await User.findOne({
+      email: email.trim().toLowerCase(),
+    }).select("+verificationToken +verificationTokenExpires")
+
+    if (!user || user.authProvider !== "local" || user.isEmailVerified) {
+      // Deliberately generic — never reveal whether the account exists.
+      res.status(200).json({
+        success: true,
+        message: "If the account exists, a new verification email has been sent.",
+      })
+      return
+    }
+
+    const verificationToken = generateVerificationToken()
+
+    user.verificationToken = hashVerificationToken(verificationToken)
+    user.verificationTokenExpires = new Date(Date.now() + 24 * 60 * 60 * 1000)
+
+    await user.save()
+
+    const emailSent = await sendVerificationEmail({
+      to: user.email,
+      name: user.name,
+      token: verificationToken,
+    })
+
+    res.status(200).json({
+      success: true,
+      message: "If the account exists, a new verification email has been sent.",
+      verificationEmailSent: emailSent,
+      devVerificationUrl: emailSent ? undefined : buildVerificationUrl(verificationToken),
+    })
+  } catch (error) {
+    console.error("Resend verification error:", error)
+
+    res.status(500).json({
+      success: false,
+      message: "Unable to resend verification email",
+    })
+  }
+}
+
+/*
+|--------------------------------------------------------------------------
+| Google OAuth — Start
+|--------------------------------------------------------------------------
+| GET /api/auth/google
+| Redirects the browser to Google's consent screen.
+*/
+
+export const googleAuth = async (
+  req: Request,
+  res: Response
+): Promise<void> => {
+  const clientId = process.env.GOOGLE_CLIENT_ID
+  const clientSecret = process.env.GOOGLE_CLIENT_SECRET
+
+  if (!clientId || !clientSecret) {
+    res.status(503).json({
+      success: false,
+      message: "Google sign-in is not configured. Set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET in .env",
+    })
+    return
+  }
+
+  const redirectUri = `${req.protocol}://${req.get("host")}/api/auth/google/callback`
+  const state = Math.random().toString(36).slice(2) + Date.now().toString(36)
+
+  res.cookie("google_oauth_state", state, {
+    httpOnly: true,
+    sameSite: "lax",
+    maxAge: 10 * 60 * 1000,
+  })
+
+  const params = new URLSearchParams({
+    client_id: clientId,
+    redirect_uri: redirectUri,
+    response_type: "code",
+    scope: "openid email profile",
+    state,
+    prompt: "select_account",
+  })
+
+  res.redirect(`https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`)
+}
+
+/*
+|--------------------------------------------------------------------------
+| Google OAuth — Callback
+|--------------------------------------------------------------------------
+| GET /api/auth/google/callback?code=...&state=...
+| Exchanges the code, loads the profile, finds/creates the user, and
+| redirects back to the frontend with a JWT in the query string.
+*/
+
+export const googleCallback = async (
+  req: Request,
+  res: Response
+): Promise<void> => {
+  const clientId = process.env.GOOGLE_CLIENT_ID
+  const clientSecret = process.env.GOOGLE_CLIENT_SECRET
+
+  if (!clientId || !clientSecret) {
+    res.status(503).json({
+      success: false,
+      message: "Google sign-in is not configured.",
+    })
+    return
+  }
+
+  const { code, state, error } = req.query as {
+    code?: string
+    state?: string
+    error?: string
+  }
+
+  const frontendUrl = process.env.FRONTEND_URL || "http://localhost:3000"
+
+  const redirectToFrontend = (query: string) => {
+    res.redirect(`${frontendUrl}/login${query}`)
+  }
+
+  if (error || !code) {
+    redirectToFrontend("?error=" + encodeURIComponent(error || "google_denied"))
+    return
+  }
+
+  const storedState = req.cookies?.google_oauth_state as string | undefined
+  res.clearCookie("google_oauth_state")
+
+  if (!storedState || storedState !== state) {
+    redirectToFrontend("?error=invalid_state")
+    return
+  }
+
+  const redirectUri = `${req.protocol}://${req.get("host")}/api/auth/google/callback`
+
+  try {
+    // 1. Exchange authorization code for tokens
+    const tokenResponse = await fetch("https://oauth2.googleapis.com/token", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        code,
+        client_id: clientId,
+        client_secret: clientSecret,
+        redirect_uri: redirectUri,
+        grant_type: "authorization_code",
+      }),
+    })
+
+    const tokenData = (await tokenResponse.json()) as {
+      access_token?: string
+      error?: string
+    }
+
+    if (!tokenResponse.ok || !tokenData.access_token) {
+      console.error("[GOOGLE] Token exchange failed:", tokenData.error || tokenResponse.statusText)
+      redirectToFrontend("?error=token_exchange_failed")
+      return
+    }
+
+    // 2. Load the user profile
+    const profileResponse = await fetch("https://www.googleapis.com/oauth2/v3/userinfo", {
+      headers: { Authorization: `Bearer ${tokenData.access_token}` },
+    })
+
+    const profile = (await profileResponse.json()) as {
+      sub?: string
+      email?: string
+      name?: string
+      picture?: string
+      email_verified?: boolean
+    }
+
+    if (!profileResponse.ok || !profile.sub || !profile.email) {
+      redirectToFrontend("?error=profile_fetch_failed")
+      return
+    }
+
+    // 3. Find existing user by googleId, then by email
+    let user = await User.findOne({ googleId: profile.sub })
+
+    if (!user) {
+      user = await User.findOne({ email: profile.email.toLowerCase() })
+
+      if (user) {
+        // Link the Google identity to the existing local account.
+        user.googleId = profile.sub
+        user.authProvider = "google"
+        user.avatar = profile.picture || user.avatar
+        user.isEmailVerified = user.isEmailVerified || Boolean(profile.email_verified)
+        await user.save()
+      }
+    }
+
+    // 4. Create a new account for first-time Google users
+    if (!user) {
+      user = await User.create({
+        name: profile.name || profile.email.split("@")[0],
+        email: profile.email.toLowerCase(),
+        authProvider: "google",
+        googleId: profile.sub,
+        avatar: profile.picture || "",
+        isEmailVerified: Boolean(profile.email_verified),
+        emailVerifiedAt: profile.email_verified ? new Date() : undefined,
+      })
+    }
+
+    // 5. Issue JWT and hand it to the frontend
+    const token = generateToken(user._id.toString(), user.role)
+    redirectToFrontend(`?token=${encodeURIComponent(token)}`)
+  } catch (error) {
+    console.error("[GOOGLE] OAuth callback error:", error)
+    redirectToFrontend("?error=oauth_failed")
   }
 }

@@ -145,3 +145,208 @@
     background: rgba(255, 255, 255, 0.2);
   }
 }
+
+/* =========================================================
+   CITATION BADGE
+   ========================================================= */
+
+.citation-badge-wrapper {
+  position: relative;
+  display: inline-block;
+}
+
+.citation-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.05);
+  cursor: pointer;
+  font-size: 11px;
+  color: #ececec;
+  transition: border-color 0.15s, background 0.15s;
+  white-space: nowrap;
+}
+
+.citation-badge:hover {
+  border-color: rgba(25, 195, 125, 0.5);
+  background: rgba(25, 195, 125, 0.08);
+}
+
+.citation-number {
+  font-weight: 700;
+  color: #19c37d;
+}
+
+.citation-label {
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.citation-score {
+  font-size: 10px;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.1);
+  color: #8e8e8e;
+}
+
+.citation-detail {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 50;
+  min-width: 240px;
+  background: #1e1e1e;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 10px;
+  padding: 10px 12px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.citation-detail-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+}
+
+.citation-detail-key {
+  color: #8e8e8e;
+  min-width: 72px;
+  flex-shrink: 0;
+}
+
+.citation-detail-val {
+  color: #ececec;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.citation-mono {
+  font-family: ui-monospace, monospace;
+  font-size: 10px;
+}
+
+.citation-score-bar-wrap {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+}
+
+.citation-score-bar {
+  height: 4px;
+  background: #19c37d;
+  border-radius: 2px;
+  transition: width 0.3s ease;
+}
+
+.citation-score-label {
+  font-size: 10px;
+  color: #8e8e8e;
+  white-space: nowrap;
+}
+
+/* =========================================================
+   FEEDBACK BUTTONS
+   ========================================================= */
+
+.feedback-buttons-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.feedback-label {
+  font-size: 11px;
+  color: #8e8e8e;
+}
+
+.feedback-btn {
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 6px;
+  padding: 2px 7px;
+  font-size: 13px;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, transform 0.1s;
+  line-height: 1.6;
+}
+
+.feedback-btn:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.08);
+  transform: scale(1.15);
+}
+
+.feedback-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.feedback-btn--active-pos {
+  border-color: #19c37d;
+  background: rgba(25, 195, 125, 0.12);
+}
+
+.feedback-btn--active-neg {
+  border-color: #f87171;
+  background: rgba(248, 113, 113, 0.1);
+}
+
+.feedback-thanks {
+  font-size: 11px;
+  color: #19c37d;
+}
+
+.feedback-reason-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 6px;
+  width: 100%;
+}
+
+.feedback-reason-input {
+  width: 100%;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  padding: 6px 10px;
+  font-size: 12px;
+  color: #ececec;
+  resize: none;
+  outline: none;
+  font-family: inherit;
+  transition: border-color 0.15s;
+}
+
+.feedback-reason-input:focus {
+  border-color: rgba(25, 195, 125, 0.4);
+}
+
+.feedback-submit-btn {
+  align-self: flex-end;
+  padding: 4px 14px;
+  border-radius: 6px;
+  background: #19c37d;
+  color: #000;
+  font-size: 12px;
+  font-weight: 600;
+  border: none;
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+
+.feedback-submit-btn:disabled {
+  opacity: 0.5;
+  cursor: wait;
+}

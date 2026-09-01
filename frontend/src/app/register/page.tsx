@@ -3,9 +3,9 @@
 import { useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { Loader2 } from "lucide-react"
+import { ExternalLink, Loader2, MailCheck } from "lucide-react"
 import { toast } from "sonner"
-import { register } from "@/features/auth/auth.service"
+import { register, startGoogleLogin } from "@/features/auth/auth.service"
 
 export default function RegisterPage() {
   const router = useRouter()
@@ -13,6 +13,7 @@ export default function RegisterPage() {
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
   const [loading, setLoading] = useState(false)
+  const [verificationLink, setVerificationLink] = useState<string | null>(null)
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -21,8 +22,8 @@ export default function RegisterPage() {
       toast.error("Complete all fields.")
       return
     }
-    if (password.length < 6) {
-      toast.error("Password must be at least 6 characters.")
+    if (password.length < 8) {
+      toast.error("Password must be at least 8 characters.")
       return
     }
 
@@ -30,6 +31,13 @@ export default function RegisterPage() {
       setLoading(true)
       const result = await register({ name: name.trim(), email: email.trim(), password })
       toast.success("Account created successfully.")
+
+      // Dev mode (no SMTP): the API returns a verification link to open manually.
+      if (result.devVerificationUrl) {
+        setVerificationLink(result.devVerificationUrl)
+        return
+      }
+
       if (result.token) {
         router.replace("/dashboard")
       } else {
@@ -42,9 +50,13 @@ export default function RegisterPage() {
     }
   }
 
+  function handleGoogle() {
+    startGoogleLogin()
+  }
+
   return (
     <main
-      className="min-h-screen flex flex-col items-center justify-center px-4"
+      className="min-h-screen flex flex-col items-center justify-center px-4 py-10"
       style={{ background: "#212121", fontFamily: "Inter, system-ui, sans-serif" }}
     >
       {/* Logo */}
@@ -62,67 +74,119 @@ export default function RegisterPage() {
         className="w-full max-w-sm rounded-2xl border border-white/10 p-6"
         style={{ background: "#2f2f2f" }}
       >
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div className="space-y-1.5">
-            <label htmlFor="name" className="block text-[13px] font-medium text-[#ececec]">
-              Name
-            </label>
-            <input
-              id="name"
-              type="text"
-              placeholder="Your name"
-              autoComplete="name"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              className="w-full rounded-xl border border-white/10 bg-[#212121] px-4 py-2.5 text-[14px] text-[#ececec] placeholder-[#8e8e8e] outline-none focus:border-white/30 transition-colors"
-            />
-          </div>
+        {/* Google sign-up */}
+        <button
+          type="button"
+          onClick={handleGoogle}
+          className="w-full rounded-xl border border-white/15 bg-white py-2.5 text-[14px] font-semibold text-[#1a1a1a] hover:bg-white/90 transition-colors flex items-center justify-center gap-2.5"
+        >
+          <svg width="18" height="18" viewBox="0 0 48 48">
+            <path fill="#FFC107" d="M43.6 20.1H42V20H24v8h11.3C33.7 32.7 29.2 36 24 36c-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.9 1.2 8 3l5.7-5.7C34.4 6.1 29.5 4 24 4 13 4 4 13 4 24s9 20 20 20 20-9 20-20c0-1.3-.1-2.6-.4-3.9z"/>
+            <path fill="#FF3D00" d="M6.3 14.7l6.6 4.8C14.7 15.1 19 12 24 12c3.1 0 5.9 1.2 8 3l5.7-5.7C34.4 6.1 29.5 4 24 4 16.3 4 9.7 8.3 6.3 14.7z"/>
+            <path fill="#4CAF50" d="M24 44c5.2 0 9.9-2 13.4-5.2l-6.2-5.2C29.2 35.1 26.7 36 24 36c-5.2 0-9.6-3.3-11.3-8l-6.5 5C9.5 39.6 16.2 44 24 44z"/>
+            <path fill="#1976D2" d="M43.6 20.1H42V20H24v8h11.3c-.8 2.2-2.2 4.2-4.1 5.6l6.2 5.2C36.9 39.2 44 34 44 24c0-1.3-.1-2.6-.4-3.9z"/>
+          </svg>
+          Continue with Google
+        </button>
 
-          <div className="space-y-1.5">
-            <label htmlFor="email" className="block text-[13px] font-medium text-[#ececec]">
-              Email
-            </label>
-            <input
-              id="email"
-              type="email"
-              autoComplete="email"
-              placeholder="you@example.com"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              className="w-full rounded-xl border border-white/10 bg-[#212121] px-4 py-2.5 text-[14px] text-[#ececec] placeholder-[#8e8e8e] outline-none focus:border-white/30 transition-colors"
-            />
-          </div>
+        {/* Divider */}
+        <div className="my-5 flex items-center gap-3">
+          <div className="h-px flex-1 bg-white/10" />
+          <span className="text-[11px] uppercase tracking-wider text-[#8e8e8e]">
+            or
+          </span>
+          <div className="h-px flex-1 bg-white/10" />
+        </div>
 
-          <div className="space-y-1.5">
-            <label htmlFor="password" className="block text-[13px] font-medium text-[#ececec]">
-              Password
-            </label>
-            <input
-              id="password"
-              type="password"
-              autoComplete="new-password"
-              placeholder="Minimum 6 characters"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              className="w-full rounded-xl border border-white/10 bg-[#212121] px-4 py-2.5 text-[14px] text-[#ececec] placeholder-[#8e8e8e] outline-none focus:border-white/30 transition-colors"
-            />
+        {verificationLink ? (
+          <div className="rounded-xl border border-[#19c37d]/30 bg-[#19c37d]/10 p-4">
+            <div className="flex items-center gap-2">
+              <MailCheck className="size-4 text-[#19c37d]" />
+              <p className="text-[13.5px] font-semibold text-[#ececec]">
+                Almost there — verify your email
+              </p>
+            </div>
+            <p className="mt-1.5 text-[12.5px] leading-5 text-[#8e8e8e]">
+              SMTP isn&apos;t configured, so here&apos;s your verification link
+              (development mode):
+            </p>
+            <a
+              href={verificationLink}
+              className="mt-2 flex items-center gap-1.5 text-[12.5px] font-medium text-[#19c37d] hover:underline break-all"
+            >
+              <ExternalLink className="size-3.5 shrink-0" />
+              {verificationLink}
+            </a>
+            <button
+              onClick={() => router.replace("/dashboard")}
+              className="mt-3 w-full rounded-xl bg-white py-2 text-[13px] font-semibold text-black hover:bg-white/90 transition-colors cursor-pointer"
+            >
+              Continue to dashboard
+            </button>
           </div>
+        ) : (
+          <form onSubmit={handleSubmit} className="space-y-4">
+            <div className="space-y-1.5">
+              <label htmlFor="name" className="block text-[13px] font-medium text-[#ececec]">
+                Name
+              </label>
+              <input
+                id="name"
+                type="text"
+                placeholder="Your name"
+                autoComplete="name"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                className="w-full rounded-xl border border-white/10 bg-[#212121] px-4 py-2.5 text-[14px] text-[#ececec] placeholder-[#8e8e8e] outline-none focus:border-white/30 transition-colors"
+              />
+            </div>
 
-          <button
-            type="submit"
-            disabled={loading}
-            className="w-full rounded-xl bg-white py-2.5 text-[14px] font-semibold text-black hover:bg-white/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-          >
-            {loading ? (
-              <>
-                <Loader2 className="size-4 animate-spin" />
-                Creating account...
-              </>
-            ) : (
-              "Continue"
-            )}
-          </button>
-        </form>
+            <div className="space-y-1.5">
+              <label htmlFor="email" className="block text-[13px] font-medium text-[#ececec]">
+                Email
+              </label>
+              <input
+                id="email"
+                type="email"
+                autoComplete="email"
+                placeholder="you@example.com"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                className="w-full rounded-xl border border-white/10 bg-[#212121] px-4 py-2.5 text-[14px] text-[#ececec] placeholder-[#8e8e8e] outline-none focus:border-white/30 transition-colors"
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <label htmlFor="password" className="block text-[13px] font-medium text-[#ececec]">
+                Password
+              </label>
+              <input
+                id="password"
+                type="password"
+                autoComplete="new-password"
+                placeholder="Minimum 8 characters"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                className="w-full rounded-xl border border-white/10 bg-[#212121] px-4 py-2.5 text-[14px] text-[#ececec] placeholder-[#8e8e8e] outline-none focus:border-white/30 transition-colors"
+              />
+            </div>
+
+            <button
+              type="submit"
+              disabled={loading}
+              className="w-full rounded-xl bg-white py-2.5 text-[14px] font-semibold text-black hover:bg-white/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+            >
+              {loading ? (
+                <>
+                  <Loader2 className="size-4 animate-spin" />
+                  Creating account...
+                </>
+              ) : (
+                "Continue"
+              )}
+            </button>
+          </form>
+        )}
       </div>
 
       <p className="mt-5 text-[13px] text-[#8e8e8e]">

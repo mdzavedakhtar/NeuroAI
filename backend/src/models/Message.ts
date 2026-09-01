@@ -11,6 +11,10 @@ export interface IMessageSource {
   score: number
   pageNumber?: number
   knowledgeId?: string
+  chunkId?: string
+  slideNumber?: number
+  sheetName?: string
+  relevanceScore?: number
 }
 
 export interface IMessage extends Document {
@@ -57,6 +61,23 @@ const messageSourceSchema = new Schema(
     pageNumber: {
       type: Number,
       default: 1,
+    },
+
+    chunkId: {
+      type: String,
+      default: "",
+    },
+
+    slideNumber: {
+      type: Number,
+    },
+
+    sheetName: {
+      type: String,
+    },
+
+    relevanceScore: {
+      type: Number,
     },
   },
   {

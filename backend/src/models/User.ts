@@ -19,9 +19,15 @@ export interface IUser extends Document {
   googleId?: string
 
   isEmailVerified: boolean
+  emailVerifiedAt?: Date
   isActive: boolean
 
+  verificationToken?: string
+  verificationTokenExpires?: Date
+
   lastLoginAt?: Date
+
+  plan: string
 
   createdAt: Date
   updatedAt: Date
@@ -83,6 +89,24 @@ const userSchema = new Schema<IUser>(
       default: false,
     },
 
+    emailVerifiedAt: {
+      type: Date,
+      default: undefined,
+    },
+
+    // SHA-256 hash of the raw verification token (never stored in plain text).
+    verificationToken: {
+      type: String,
+      select: false,
+      default: undefined,
+    },
+
+    verificationTokenExpires: {
+      type: Date,
+      select: false,
+      default: undefined,
+    },
+
     isActive: {
       type: Boolean,
       default: true,
@@ -91,6 +115,12 @@ const userSchema = new Schema<IUser>(
     lastLoginAt: {
       type: Date,
       default: undefined,
+    },
+
+    plan: {
+      type: String,
+      enum: ["free", "developer"],
+      default: "free",
     },
   },
   {

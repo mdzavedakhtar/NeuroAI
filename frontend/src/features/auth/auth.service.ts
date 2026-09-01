@@ -9,6 +9,7 @@ import type {
   AuthResponse,
   LoginPayload,
   RegisterPayload,
+  User,
 } from "./auth.types"
 
 export async function login(
@@ -137,6 +138,48 @@ export async function changePassword(payload: {
     method: "PUT",
     body: JSON.stringify(payload),
   })
+}
+
+export async function getMe() {
+  return apiFetch<{
+    success: boolean
+    user?: User
+  }>("/auth/me")
+}
+
+export async function verifyEmail(
+  token: string
+) {
+  return apiFetch<{
+    success: boolean
+    message: string
+  }>("/auth/verify-email", {
+    method: "POST",
+    body: JSON.stringify({ token }),
+  })
+}
+
+export async function resendVerification(
+  email: string
+) {
+  return apiFetch<{
+    success: boolean
+    message: string
+    verificationEmailSent?: boolean
+    devVerificationUrl?: string
+  }>("/auth/resend-verification", {
+    method: "POST",
+    body: JSON.stringify({ email }),
+  })
+}
+
+// Google OAuth — redirect the browser to the backend consent flow.
+export function startGoogleLogin() {
+  const apiUrl =
+    process.env.NEXT_PUBLIC_API_URL ??
+    "http://localhost:5000/api"
+
+  window.location.href = `${apiUrl}/auth/google`
 }
 
 export function logout() {

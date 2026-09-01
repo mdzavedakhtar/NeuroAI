@@ -1,5 +1,6 @@
 import { Router } from "express"
 import { protect } from "../middleware/auth.middleware"
+import { verifyKnowledgeOwnership } from "../middleware/ownership.middleware"
 import {
   queryGraphHandler,
   entityLookupHandler,
@@ -14,7 +15,7 @@ const router = Router()
 // Body: { query: string, knowledgeId?: string }
 // ======================================================
 
-router.post("/query", protect, queryGraphHandler)
+router.post("/query", protect, verifyKnowledgeOwnership, queryGraphHandler)
 
 // ======================================================
 // ENTITY LOOKUP (direct name search)

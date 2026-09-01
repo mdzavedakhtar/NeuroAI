@@ -1,8 +1,14 @@
-﻿export type Source = {
+export type Source = {
   sourceNumber?: number
   fileName?: string
   chunkIndex?: number
   score?: number
+  pageNumber?: number
+  knowledgeId?: string
+  chunkId?: string
+  slideNumber?: number
+  sheetName?: string
+  relevanceScore?: number
 }
 
 export type Conversation = {
@@ -14,12 +20,20 @@ export type Conversation = {
   updatedAt?: string
 }
 
+export type FeedbackRating = "helpful" | "not_helpful"
+
+export type MessageFeedback = {
+  rating: FeedbackRating
+  reason?: string
+}
+
 export type ChatMessage = {
   _id?: string
   conversationId?: string
   role: "user" | "assistant"
   content: string
   sources?: Source[]
+  feedback?: MessageFeedback
   createdAt?: string
 }
 

@@ -1,0 +1,138 @@
+# Production Docker Compose — NeuroStack AI
+# Use: docker compose -f docker-compose.prod.yml up -d
+#
+# Required secrets (set via environment or .env.prod):
+#   JWT_SECRET, GEMINI_API_KEY, PINECONE_API_KEY, PINECONE_INDEX_NAME
+#   NEO4J_PASSWORD, DOCKERHUB_USERNAME
+
+services:
+  mongodb:
+    image: mongo:7
+    restart: always
+    volumes:
+      - mongo-data:/data/db
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_ROOT_USER:-admin}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD:?err}
+    networks: [internal]
+    # No external port exposure in production
+
+  neo4j:
+    image: neo4j:5-community
+    restart: always
+    environment:
+      NEO4J_AUTH: neo4j/${NEO4J_PASSWORD:?err}
+      NEO4J_server_memory_heap_initial__size: 512m
+      NEO4J_server_memory_heap_max__size: 1G
+    volumes:
+      - neo4j-data:/data
+    networks: [internal]
+
+  redis:
+    image: redis:7-alpine
+    restart: always
+    command: redis-server --requirepass ${REDIS_PASSWORD:?err} --maxmemory 256mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis-data:/data
+    networks: [internal]
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    image: ${DOCKERHUB_USERNAME}/neurostack-backend:latest
+    restart: always
+    depends_on:
+      redis:
+        condition: service_healthy
+      mongodb:
+        condition: service_started
+      neo4j:
+        condition: service_started
+    environment:
+      NODE_ENV: production
+      PORT: 5000
+      MONGODB_URI: mongodb://${MONGO_ROOT_USER:-admin}:${MONGO_ROOT_PASSWORD}@mongodb:27017/neurostack?authSource=admin
+      JWT_SECRET: ${JWT_SECRET:?err}
+      FRONTEND_URL: ${FRONTEND_URL:?err}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:?err}
+      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-2.0-flash}
+      PINECONE_API_KEY: ${PINECONE_API_KEY:?err}
+      PINECONE_INDEX_NAME: ${PINECONE_INDEX_NAME:?err}
+      NEO4J_URI: bolt://neo4j:7687
+      NEO4J_USERNAME: neo4j
+      NEO4J_PASSWORD: ${NEO4J_PASSWORD}
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASS: ${SMTP_PASS:-}
+      SMTP_FROM: ${SMTP_FROM:-}
+      APP_URL: ${FRONTEND_URL}
+      REQUIRE_EMAIL_VERIFICATION: ${REQUIRE_EMAIL_VERIFICATION:-false}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+    volumes:
+      - uploads:/app/uploads
+    networks: [internal, public]
+
+  worker:
+    image: ${DOCKERHUB_USERNAME}/neurostack-backend:latest
+    restart: always
+    command: ["node", "dist/workers/ingestion.worker.js"]
+    depends_on:
+      redis:
+        condition: service_healthy
+      mongodb:
+        condition: service_started
+    environment:
+      NODE_ENV: production
+      MONGODB_URI: mongodb://${MONGO_ROOT_USER:-admin}:${MONGO_ROOT_PASSWORD}@mongodb:27017/neurostack?authSource=admin
+      GEMINI_API_KEY: ${GEMINI_API_KEY}
+      PINECONE_API_KEY: ${PINECONE_API_KEY}
+      PINECONE_INDEX_NAME: ${PINECONE_INDEX_NAME}
+      NEO4J_URI: bolt://neo4j:7687
+      NEO4J_USERNAME: neo4j
+      NEO4J_PASSWORD: ${NEO4J_PASSWORD}
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
+    volumes:
+      - uploads:/app/uploads
+    networks: [internal]
+
+  frontend:
+    image: ${DOCKERHUB_USERNAME}/neurostack-frontend:latest
+    restart: always
+    depends_on:
+      - backend
+    environment:
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:?err}
+    networks: [internal, public]
+
+  nginx:
+    image: nginx:1.27-alpine
+    restart: always
+    depends_on:
+      - frontend
+      - backend
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/certs:/etc/nginx/certs:ro
+    networks: [public]
+
+volumes:
+  mongo-data:
+  neo4j-data:
+  redis-data:
+  uploads:
+
+networks:
+  internal:
+    driver: bridge
+    internal: true
+  public:
+    driver: bridge

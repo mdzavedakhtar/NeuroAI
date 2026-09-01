@@ -1,8 +1,11 @@
 ﻿export type User = {
   _id: string
+  id?: string
   name?: string
   email: string
   role?: string
+  avatar?: string
+  isEmailVerified?: boolean
 }
 
 export type LoginPayload = {
@@ -18,7 +21,9 @@ export type RegisterPayload = {
 
 export type AuthResponse = {
   success?: boolean
-  token: string
+  token?: string
   user?: User
   message?: string
+  verificationEmailSent?: boolean
+  devVerificationUrl?: string
 }

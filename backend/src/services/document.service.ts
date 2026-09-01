@@ -2,6 +2,7 @@ import fs from "fs"
 import mammoth from "mammoth"
 import * as XLSX from "xlsx"
 import { PDFParse } from "pdf-parse"
+import { parsePptx } from "./pptx.parser"
 
 export interface ProcessedDocument {
   text: string
@@ -12,7 +13,7 @@ export interface ProcessedDocument {
   fileType: string
 }
 
-function createChunks(
+export function createChunks(
   text: string,
   chunkSize = 1000,
   overlap = 200
@@ -197,24 +198,23 @@ export async function processXLSX(
 export async function processPPTX(
   filePath: string
 ): Promise<ProcessedDocument> {
-  const workbook = XLSX.readFile(filePath)
+  const slides = await parsePptx(filePath)
 
   let fullText = ""
   const chunks: string[] = []
   const chunkPageNumbers: number[] = []
 
-  workbook.SheetNames.forEach((sheetName, index) => {
-    const sheet = workbook.Sheets[sheetName]
-    const slideText = XLSX.utils.sheet_to_txt(sheet).trim()
+  slides.forEach((slide) => {
+    const slideText = slide.text.trim()
     
     if (slideText) {
-      const header = `=== Slide: ${sheetName} ===\n`
+      const header = `=== Slide: ${slide.slideNumber} ===\n`
       fullText += `\n\n${header}${slideText}`
 
       const slideChunks = createChunks(slideText)
       slideChunks.forEach((chunk) => {
         chunks.push(`${header}${chunk}`)
-        chunkPageNumbers.push(index + 1) // Slide index starting from 1
+        chunkPageNumbers.push(slide.slideNumber)
       })
     }
   })
@@ -226,7 +226,7 @@ export async function processPPTX(
     chunks,
     chunkPageNumbers,
     characters: text.length,
-    pages: workbook.SheetNames.length || 1,
+    pages: slides.length || 1,
     fileType: "pptx",
   }
 }

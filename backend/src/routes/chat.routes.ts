@@ -5,6 +5,10 @@ import {
 } from "../middleware/auth.middleware"
 
 import {
+  verifyKnowledgeOwnership,
+} from "../middleware/ownership.middleware"
+
+import {
   createConversation,
   getConversations,
   getConversationMessages,
@@ -20,6 +24,7 @@ router.use(protect)
 // Create new conversation
 router.post(
   "/conversations",
+  verifyKnowledgeOwnership,
   createConversation
 )
 

@@ -16,6 +16,8 @@ import {
   Share2,
   Trash2,
   X,
+  Code,
+  BarChart3,
 } from "lucide-react"
 import ReactMarkdown from "react-markdown"
 import remarkGfm from "remark-gfm"
@@ -41,9 +43,14 @@ import {
   indexKnowledge,
   extractKnowledgeId,
 } from "@/features/knowledge/knowledge.service"
-import { logout } from "@/features/auth/auth.service"
+import {
+  logout,
+  resendVerification,
+} from "@/features/auth/auth.service"
 import { getToken } from "@/services/api"
 import { ManageDocumentsModal } from "./manage-documents-modal"
+import { CitationBadge } from "./CitationBadge"
+import { FeedbackButtons } from "./FeedbackButtons"
 import { cn } from "@/lib/utils"
 import type { ChatMessage, Conversation } from "./chat.types"
 
@@ -76,12 +83,16 @@ export function ChatWorkspace() {
   const [streamingMsgId, setStreamingMsgId] = useState<string | null>(null)
   const [streamingSources, setStreamingSources] = useState<any[]>([])
 
-  const [activeModel, setActiveModel] = useState<string>("gemini-2.5-flash")
+  const [activeModel, setActiveModel] = useState<string>("gemini-2.0-flash")
   const abortControllerRef = useRef<AbortController | null>(null)
 
   const bottomRef = useRef<HTMLDivElement>(null)
   const sendingRef = useRef(false)
-  const [userProfile, setUserProfile] = useState<{ name?: string; email?: string } | null>(null)
+  const [userProfile, setUserProfile] = useState<{
+    name?: string
+    email?: string
+    isEmailVerified?: boolean
+  } | null>(null)
 
   // Detect mobile and set initial sidebar state
   useEffect(() => {
@@ -172,13 +183,22 @@ export function ChatWorkspace() {
     const file = e.target.files?.[0]
     if (!file) return
 
-    if (file.type !== "application/pdf") {
-      toast.error("Only PDF files are supported.")
+    const allowedMimes = new Set([
+      "application/pdf",
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    ])
+    const allowedExtensions = new Set([".pdf", ".docx", ".xlsx", ".pptx"])
+    const extension = file.name.substring(file.name.lastIndexOf(".")).toLowerCase()
+
+    if (!allowedMimes.has(file.type) && !allowedExtensions.has(extension)) {
+      toast.error("Unsupported file format. Only PDF, DOCX, XLSX, and PPTX files are supported.")
       return
     }
 
-    if (file.size > 25 * 1024 * 1024) {
-      toast.error("PDF file exceeds 25 MB limit.")
+    if (file.size > 50 * 1024 * 1024) {
+      toast.error("File exceeds 50 MB limit.")
       return
     }
 
@@ -186,7 +206,7 @@ export function ChatWorkspace() {
       file,
       knowledgeId: "",
       status: "uploading",
-      progressMessage: "Uploading PDF...",
+      progressMessage: "Uploading file...",
     })
 
     try {
@@ -434,6 +454,24 @@ export function ChatWorkspace() {
     router.replace("/login")
   }
 
+  async function handleResendVerification() {
+    if (!userProfile?.email) {
+      toast.error("No email address on file.")
+      return
+    }
+
+    try {
+      const result = await resendVerification(userProfile.email)
+      toast.success(
+        result.devVerificationUrl
+          ? "Verification link ready — click the banner to open it."
+          : result.message || "Verification email sent."
+      )
+    } catch {
+      toast.error("Failed to resend verification email.")
+    }
+  }
+
   const userInitial = userProfile?.name?.charAt(0).toUpperCase() || "U"
 
   return (
@@ -535,6 +573,24 @@ export function ChatWorkspace() {
 
         {/* Sidebar Footer */}
         <div className="border-t border-white/[0.08] p-2 space-y-0.5">
+          {/* Email verification banner */}
+          {userProfile && userProfile.isEmailVerified === false && (
+            <div className="mx-0.5 mb-1 rounded-lg bg-[#3a2d12] border border-[#8a6d1f]/40 px-3 py-2">
+              <p className="text-[11px] font-medium text-[#e6c35c]">
+                Verify your email
+              </p>
+              <p className="mt-0.5 text-[10.5px] text-[#8e8e8e]">
+                Some features stay locked until your email is confirmed.
+              </p>
+              <button
+                onClick={() => void handleResendVerification()}
+                className="mt-1 text-[11px] text-[#e6c35c] hover:underline cursor-pointer"
+              >
+                Resend verification email
+              </button>
+            </div>
+          )}
+
           {/* Graph Explorer */}
           <button
             onClick={() => router.push("/dashboard/graph")}
@@ -551,6 +607,24 @@ export function ChatWorkspace() {
           >
             <Settings className="size-4 shrink-0" />
             <span>Settings</span>
+          </button>
+
+          {/* Developer Platform */}
+          <button
+            onClick={() => router.push("/dashboard/developer")}
+            className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-[#8e8e8e] hover:bg-white/5 hover:text-[#ececec] transition-colors text-[13.5px]"
+          >
+            <Code className="size-4 shrink-0" />
+            <span>Developer Platform</span>
+          </button>
+
+          {/* Analytics Console */}
+          <button
+            onClick={() => router.push("/dashboard/analytics")}
+            className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-[#8e8e8e] hover:bg-white/5 hover:text-[#ececec] transition-colors text-[13.5px]"
+          >
+            <BarChart3 className="size-4 shrink-0" />
+            <span>Analytics Console</span>
           </button>
 
           {/* Document Library */}
@@ -618,29 +692,29 @@ export function ChatWorkspace() {
             {/* Model Selector Dropdown */}
             <DropdownMenu>
               <DropdownMenuTrigger className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl hover:bg-white/5 transition-colors text-[14px] font-semibold text-[#8e8e8e] hover:text-[#ececec] bg-transparent border-0 outline-none cursor-pointer">
-                <span>{activeModel === "gemini-2.5-flash" ? "Gemini 2.5 Flash" : "Gemini 2.5 Pro"}</span>
+                <span>{activeModel === "gemini-2.0-flash" ? "Gemini 2.0 Flash" : "Gemini 3.5 Flash"}</span>
                 <ChevronDown className="size-3.5" />
               </DropdownMenuTrigger>
               <DropdownMenuContent className="w-52 bg-[#2f2f2f] border-white/10 text-[#ececec] p-1 rounded-xl shadow-2xl z-50">
                 <DropdownMenuItem
-                  onClick={() => setActiveModel("gemini-2.5-flash")}
+                  onClick={() => setActiveModel("gemini-2.0-flash")}
                   className={cn(
                     "flex flex-col items-start gap-0.5 px-3 py-2 rounded-lg cursor-pointer text-[13px] hover:bg-white/5 focus:bg-white/5",
-                    activeModel === "gemini-2.5-flash" && "bg-white/5 text-[#ececec]"
+                    activeModel === "gemini-2.0-flash" && "bg-white/5 text-[#ececec]"
                   )}
                 >
-                  <span className="font-semibold text-[13px]">Gemini 2.5 Flash</span>
+                  <span className="font-semibold text-[13px]">Gemini 2.0 Flash</span>
                   <span className="text-[10px] text-[#8e8e8e] leading-tight mt-0.5">High speed general reasoning & coding</span>
                 </DropdownMenuItem>
                 <DropdownMenuItem
-                  onClick={() => setActiveModel("gemini-2.5-pro")}
+                  onClick={() => setActiveModel("gemini-3.5-flash")}
                   className={cn(
                     "flex flex-col items-start gap-0.5 px-3 py-2 rounded-lg cursor-pointer text-[13px] hover:bg-white/5 focus:bg-white/5",
-                    activeModel === "gemini-2.5-pro" && "bg-white/5 text-[#ececec]"
+                    activeModel === "gemini-3.5-flash" && "bg-white/5 text-[#ececec]"
                   )}
                 >
-                  <span className="font-semibold text-[13px]">Gemini 2.5 Pro</span>
-                  <span className="text-[10px] text-[#8e8e8e] leading-tight mt-0.5">Complex logic, coding and deep analysis</span>
+                  <span className="font-semibold text-[13px]">Gemini 3.5 Flash</span>
+                  <span className="text-[10px] text-[#8e8e8e] leading-tight mt-0.5">Balanced speed & reasoning</span>
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
@@ -680,7 +754,7 @@ export function ChatWorkspace() {
             {/* Messages */}
             <div className="space-y-0">
               {messages.map((msg, index) => (
-                <MessageRow key={index} msg={msg} userInitial={userInitial} />
+                <MessageRow key={index} msg={msg} conversationId={activeConversation?._id} userInitial={userInitial} />
               ))}
 
               {/* Streaming message */}
@@ -756,7 +830,7 @@ export function ChatWorkspace() {
               <input
                 type="file"
                 ref={fileInputRef}
-                accept=".pdf"
+                accept=".pdf,.docx,.xlsx,.pptx"
                 className="hidden"
                 onChange={handleFileAttach}
               />
@@ -773,13 +847,13 @@ export function ChatWorkspace() {
 
               {/* Bottom action row */}
               <div className="flex items-center justify-between px-3 pb-3">
-                {/* Attach PDF button */}
+                {/* Attach Document button */}
                 <button
                   type="button"
                   disabled={loading || attachment !== null}
                   onClick={() => fileInputRef.current?.click()}
                   className="p-2 rounded-lg text-[#8e8e8e] hover:text-[#ececec] hover:bg-white/10 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-                  title="Attach PDF"
+                  title="Attach Document"
                 >
                   <Paperclip className="size-4" />
                 </button>
@@ -831,10 +905,12 @@ export function ChatWorkspace() {
 
 function MessageRow({
   msg,
+  conversationId,
   isStreaming = false,
   userInitial,
 }: {
   msg: ChatMessage
+  conversationId?: string
   isStreaming?: boolean
   userInitial: string
 }) {
@@ -929,28 +1005,15 @@ function MessageRow({
                 <span className="inline-block align-middle ml-0.5 w-[2px] h-[1.1em] bg-[#ececec] animate-pulse" />
               )}
 
-              {/* RAG Sources */}
+              {/* RAG Sources — CitationBadge */}
               {msg.sources && msg.sources.length > 0 && (
                 <div className="mt-5 border-t border-white/10 pt-4">
-                  <p className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-[#8e8e8e]">
+                  <p className="mb-3 text-[11px] font-semibold uppercase tracking-wider text-[#8e8e8e]">
                     Sources
                   </p>
                   <div className="flex flex-wrap gap-2">
                     {msg.sources.map((src: any, sIdx: number) => (
-                      <div
-                        key={sIdx}
-                        className="flex items-center gap-2 rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-xs hover:border-white/20 transition-colors"
-                      >
-                        <FileText className="size-3.5 shrink-0 text-[#19c37d]" />
-                        <span className="max-w-44 truncate text-[#ececec]">
-                          {src.fileName ?? "Source Document"}
-                        </span>
-                        {typeof src.score === "number" && (
-                          <span className="rounded bg-white/10 px-1.5 py-0.5 text-[10px] text-[#8e8e8e]">
-                            {(src.score * 100).toFixed(0)}%
-                          </span>
-                        )}
-                      </div>
+                      <CitationBadge key={sIdx} source={{ ...src, sourceNumber: src.sourceNumber ?? sIdx + 1 }} />
                     ))}
                   </div>
                 </div>
@@ -962,9 +1025,9 @@ function MessageRow({
             </div>
           )}
 
-          {/* Copy Message Action (Visible on Hover) */}
+          {/* Copy + Feedback actions (visible on hover for assistant messages) */}
           {!isStreaming && (
-            <div className="flex items-center gap-2 mt-3 opacity-0 group-hover:opacity-100 transition-opacity">
+            <div className="flex items-center gap-3 mt-3 opacity-0 group-hover:opacity-100 transition-opacity">
               <button
                 onClick={handleCopy}
                 className="flex items-center gap-1.5 text-[11px] text-[#8e8e8e] hover:text-[#ececec] transition-colors bg-transparent border-0 outline-none cursor-pointer"
@@ -981,6 +1044,14 @@ function MessageRow({
                   </>
                 )}
               </button>
+
+              {isAI && msg._id && conversationId && (
+                <FeedbackButtons
+                  messageId={msg._id}
+                  conversationId={conversationId}
+                  initialRating={msg.feedback?.rating}
+                />
+              )}
             </div>
           )}
         </div>

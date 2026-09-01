@@ -82,13 +82,24 @@ const fileFilter = (
   file: Express.Multer.File,
   callback: FileFilterCallback
 ) => {
+  const extension = path.extname(file.originalname).toLowerCase()
+  const allowedExtensions = new Set([".pdf", ".docx", ".xlsx", ".pptx"])
+
+  if (!allowedExtensions.has(extension)) {
+    callback(
+      new Error(
+        "Unsupported file extension. Only PDF, DOCX, XLSX and PPTX files are allowed."
+      )
+    )
+    return
+  }
+
   if (!allowedMimeTypes.has(file.mimetype)) {
     callback(
       new Error(
-        "Unsupported file type. Only PDF, DOCX, PPTX and XLSX files are allowed."
+        "Unsupported file MIME type. Only PDF, DOCX, XLSX and PPTX files are allowed."
       )
     )
-
     return
   }
 

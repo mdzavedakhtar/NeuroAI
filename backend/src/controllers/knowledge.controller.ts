@@ -1,205 +1,129 @@
 import { Response } from "express"
 import fs from "fs/promises"
+import path from "path"
 
 import Knowledge from "../models/Knowledge"
 import KnowledgeChunk from "../models/KnowledgeChunk"
 import { AuthRequest } from "../middleware/auth.middleware"
-import { processDocument } from "../services/document.service"
 import { getPineconeIndex } from "../services/pinecone.service"
-import { ingestChunksToGraph } from "../services/graph.ingestion.service"
 import { deleteGraphForKnowledge } from "../services/neo4j.service"
+import { getCache, setCache, invalidateCache, invalidateCacheByPattern } from "../services/redis.cache.service"
+
+// ======================================================
+// MAGIC BYTES VERIFICATION
+// Prevents file type spoofing (e.g. renaming .exe to .pdf)
+// ======================================================
+
+export async function verifyFileSignature(
+  filePath: string,
+  extension: string
+): Promise<boolean> {
+  let fileHandle: Awaited<ReturnType<typeof fs.open>> | null = null
+  try {
+    fileHandle = await fs.open(filePath, "r")
+    const buffer = Buffer.alloc(4)
+    await fileHandle.read(buffer, 0, 4, 0)
+    const hex = buffer.toString("hex").toUpperCase()
+
+    if (extension === ".pdf") {
+      // %PDF
+      return hex.startsWith("25504446")
+    } else if ([".docx", ".pptx", ".xlsx"].includes(extension)) {
+      // PK (ZIP)
+      return hex.startsWith("504B")
+    }
+    return false
+  } catch (err) {
+    console.error("Error reading file signature:", err)
+    return false
+  } finally {
+    if (fileHandle) {
+      await fileHandle.close()
+    }
+  }
+}
+
+// ======================================================
+// UPLOAD KNOWLEDGE
+// ======================================================
 
 export const uploadKnowledge = async (
   req: AuthRequest,
   res: Response
 ): Promise<void> => {
-  let knowledgeId: string | null = null
+  let uploadedFilePath: string | null = null
 
   try {
-    // --------------------------------------------------
-    // Authentication
-    // --------------------------------------------------
-
     if (!req.user) {
-      res.status(401).json({
-        success: false,
-        message: "Authentication required",
-      })
+      res.status(401).json({ success: false, message: "Authentication required" })
       return
     }
-
-    // --------------------------------------------------
-    // File validation
-    // --------------------------------------------------
 
     if (!req.file) {
+      res.status(400).json({ success: false, message: "Please select a file to upload" })
+      return
+    }
+
+    uploadedFilePath = req.file.path
+
+    // Extension allowlist check
+    const extension = path.extname(req.file.originalname).toLowerCase()
+    const allowedExtensions = new Set([".pdf", ".docx", ".xlsx", ".pptx"])
+    if (!allowedExtensions.has(extension)) {
+      await fs.unlink(uploadedFilePath).catch(() => {})
       res.status(400).json({
         success: false,
-        message: "Please select a file to upload",
+        message: "Unsupported file extension. Only PDF, DOCX, XLSX, and PPTX files are allowed.",
       })
       return
     }
 
-    // --------------------------------------------------
-    // Create Knowledge record
-    // --------------------------------------------------
+    // Magic bytes check (prevents spoofed file types)
+    const isValid = await verifyFileSignature(uploadedFilePath, extension)
+    if (!isValid) {
+      await fs.unlink(uploadedFilePath).catch(() => {})
+      res.status(400).json({
+        success: false,
+        message: "Invalid file content. File contents do not match the declared file extension.",
+      })
+      return
+    }
 
+    // Create Knowledge record
     const knowledge = await Knowledge.create({
       user: req.user.id,
-
       originalName: req.file.originalname,
       fileName: req.file.filename,
       mimeType: req.file.mimetype,
       size: req.file.size,
       path: req.file.path,
-
-      status: "processing",
+      status: "uploaded",
+      currentStep: "uploaded",
     })
 
-    knowledgeId = knowledge._id.toString()
-
-    const SUPPORTED_TYPES = [
-      "application/pdf",
-      "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-      "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-    ]
-
-    if (SUPPORTED_TYPES.includes(req.file.mimetype)) {
-      try {
-        const processed = await processDocument(
-          req.file.path,
-          req.file.mimetype
-        )
-
-        const chunkDocuments = processed.chunks.map(
-          (chunk, index) => ({
-            knowledgeId: knowledge._id,
-            userId: req.user!.id,
-            chunkIndex: index,
-            content: chunk,
-            characterCount: chunk.length,
-            sourceType: processed.fileType,
-            originalName: knowledge.originalName,
-            pageNumber: processed.chunkPageNumbers ? processed.chunkPageNumbers[index] : 1,
-            embeddingStatus: "pending",
-          })
-        )
-
-        if (chunkDocuments.length === 0) {
-          throw new Error("Document contains no readable text content.")
-        }
-
-        await KnowledgeChunk.insertMany(chunkDocuments)
-
-        // --------------------------------------------------
-        // GRAPH INGESTION (fire-and-forget — never blocks upload)
-        // --------------------------------------------------
-
-        const savedChunks = await KnowledgeChunk.find({
-          knowledgeId: knowledge._id,
-        }).select("_id chunkIndex content pageNumber").lean()
-
-        ingestChunksToGraph(
-          savedChunks.map((c) => ({
-            chunkId:    c._id.toString(),
-            chunkIndex: c.chunkIndex,
-            content:    c.content,
-            pageNumber: c.pageNumber ?? 1,
-          })),
-          {
-            documentId: knowledge._id.toString(),
-            userId:     req.user!.id,
-            fileName:   knowledge.originalName,
-            fileType:   processed.fileType,
-            uploadedAt: knowledge.createdAt?.toISOString() ?? new Date().toISOString(),
-          }
-        ).catch((err) =>
-          console.error("[GRAPH] Background ingestion error:", err)
-        )
-
-        knowledge.characters = processed.characters
-        knowledge.status = "ready"
-        knowledge.errorMessage = ""
-
-        await knowledge.save()
-
-        res.status(201).json({
-          success: true,
-          message: `${processed.fileType.toUpperCase()} uploaded, processed and chunked successfully`,
-          knowledge: {
-            id: knowledge._id,
-            originalName: knowledge.originalName,
-            mimeType: knowledge.mimeType,
-            size: knowledge.size,
-            status: knowledge.status,
-            pages: processed.pages,
-            chunks: knowledge.chunks,
-            characters: knowledge.characters,
-            fileType: processed.fileType,
-            embeddingStatus: "pending",
-            createdAt: knowledge.createdAt,
-          },
-        })
-
-        return
-      } catch (processingError) {
-        console.error("Document processing error:", processingError)
-
-        await KnowledgeChunk.deleteMany({ knowledgeId: knowledge._id })
-
-        knowledge.status = "failed"
-        knowledge.errorMessage =
-          processingError instanceof Error
-            ? processingError.message
-            : "Document processing failed"
-
-        await knowledge.save()
-
-        res.status(422).json({
-          success: false,
-          message: "Document processing failed",
-          knowledge: {
-            id: knowledge._id,
-            originalName: knowledge.originalName,
-            status: knowledge.status,
-          },
-        })
-
-        return
-      }
-    }
-
-    // Fallback for any other file type
-    knowledge.status = "uploaded"
-    await knowledge.save()
+    await invalidateCache(`cache:user:${req.user.id}:sources`)
 
     res.status(201).json({
       success: true,
-      message: "File uploaded. File type not yet supported for parsing.",
+      message: "Document uploaded successfully. Call /index to begin processing.",
       knowledge: {
         id: knowledge._id,
         originalName: knowledge.originalName,
         mimeType: knowledge.mimeType,
         size: knowledge.size,
         status: knowledge.status,
+        currentStep: knowledge.currentStep,
+        fileType: extension.slice(1),
+        embeddingStatus: "pending",
         createdAt: knowledge.createdAt,
       },
     })
   } catch (error) {
-    console.error(
-      "Knowledge upload error:",
-      error
-    )
+    console.error("Knowledge upload error:", error)
 
-    // Clean up orphan file only when the
-    // Knowledge record was never created.
-    if (!knowledgeId && req.file?.path) {
-      try {
-        await fs.unlink(req.file.path)
-      } catch {
-        // File may already be gone.
-      }
+    // Clean up orphan file if Knowledge record was never created
+    if (uploadedFilePath) {
+      await fs.unlink(uploadedFilePath).catch(() => {})
     }
 
     res.status(500).json({
@@ -209,15 +133,26 @@ export const uploadKnowledge = async (
   }
 }
 
+// ======================================================
+// GET KNOWLEDGE SOURCES
+// ======================================================
+
 export const getKnowledgeSources = async (
   req: AuthRequest,
   res: Response
 ): Promise<void> => {
   try {
     if (!req.user) {
-      res.status(401).json({
-        success: false,
-        message: "Authentication required",
+      res.status(401).json({ success: false, message: "Authentication required" })
+      return
+    }
+
+    const cacheKey = `cache:user:${req.user.id}:sources`
+    const cached = await getCache<any[]>(cacheKey)
+    if (cached) {
+      res.status(200).json({
+        success: true,
+        sources: cached,
       })
       return
     }
@@ -225,6 +160,8 @@ export const getKnowledgeSources = async (
     const sources = await Knowledge.find({ user: req.user.id })
       .sort({ createdAt: -1 })
       .lean()
+
+    await setCache(cacheKey, sources, 300)
 
     res.status(200).json({
       success: true,
@@ -239,33 +176,30 @@ export const getKnowledgeSources = async (
   }
 }
 
+// ======================================================
+// DELETE KNOWLEDGE SOURCE
+// Ownership already verified by verifyKnowledgeOwnership middleware.
+// req.knowledge is attached and confirmed to belong to req.user.
+// ======================================================
+
 export const deleteKnowledgeSource = async (
   req: AuthRequest,
   res: Response
 ): Promise<void> => {
   try {
     if (!req.user) {
-      res.status(401).json({
-        success: false,
-        message: "Authentication required",
-      })
+      res.status(401).json({ success: false, message: "Authentication required" })
       return
     }
 
-    const knowledgeId = req.params.knowledgeId as string
-
-    const knowledge = await Knowledge.findOne({
-      _id: knowledgeId,
-      user: req.user.id,
-    })
+    const knowledge = req.knowledge
 
     if (!knowledge) {
-      res.status(404).json({
-        success: false,
-        message: "Knowledge source not found",
-      })
+      res.status(404).json({ success: false, message: "Knowledge source not found" })
       return
     }
+
+    const knowledgeId = knowledge._id.toString()
 
     // 1. Delete chunks from MongoDB
     await KnowledgeChunk.deleteMany({ knowledgeId })
@@ -273,11 +207,7 @@ export const deleteKnowledgeSource = async (
     // 2. Delete vectors from Pinecone
     try {
       const index = await getPineconeIndex()
-      await index.deleteMany({
-        filter: {
-          knowledgeId: knowledgeId,
-        },
-      })
+      await index.deleteMany({ filter: { knowledgeId } })
     } catch (pineconeErr) {
       console.error("Failed to delete chunks from Pinecone:", pineconeErr)
     }
@@ -289,17 +219,21 @@ export const deleteKnowledgeSource = async (
       console.error("[GRAPH] Failed to delete graph nodes:", graphErr)
     }
 
-    // 4. Delete physical file from disk (if exists)
+    // 4. Delete physical file from disk
     if (knowledge.path) {
       try {
         await fs.unlink(knowledge.path)
       } catch (err) {
-        console.error("Failed to unlink local file path:", err)
+        console.error("Failed to unlink local file:", err)
       }
     }
 
-    // 4. Delete the Knowledge document itself
+    // 5. Delete the Knowledge document itself
     await Knowledge.deleteOne({ _id: knowledgeId })
+
+    // Invalidate caches
+    await invalidateCache(`cache:user:${req.user.id}:sources`)
+    await invalidateCacheByPattern(`cache:user:${req.user.id}:search:*`)
 
     res.status(200).json({
       success: true,

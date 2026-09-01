@@ -3,7 +3,7 @@ import { GoogleGenAI } from "@google/genai"
 import type { EntityType } from "./neo4j.service"
 
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY! })
-const extractionModel = process.env.GEMINI_MODEL || "gemini-2.5-flash"
+const extractionModel = process.env.GEMINI_MODEL || "gemini-2.0-flash"
 
 // ======================================================
 // TYPES

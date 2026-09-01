@@ -16,6 +16,9 @@ import {
   generateRagAnswer,
   generateRagAnswerStream,
 } from "../services/gemini.service"
+import { buildMemoryContext } from "../services/memory.service"
+import { trackRequest, trackGeneration, checkLimits } from "../services/usage.service"
+import RequestLog from "../models/RequestLog"
 
 const getUserId = (req: Request) => {
   const user = (req as any).user
@@ -268,6 +271,12 @@ export const sendChatMessage = async (
       })
     }
 
+    // ── Plan quota check ──────────────────────────────────────────────────────
+    const genCheck = await checkLimits(userId, "aiGenerations")
+    if (!genCheck.allowed) {
+      return res.status(403).json({ success: false, message: genCheck.message })
+    }
+
     const conversationId =
       req.params.conversationId as string
 
@@ -386,6 +395,7 @@ if (recentDuplicate) {
     // --------------------------------------------------
 
     let answer: string
+    const { conversationHistory } = await buildMemoryContext(conversationId, userId)
 
     if (!conversation.knowledgeId) {
       // General conversation
@@ -393,6 +403,7 @@ if (recentDuplicate) {
       answer = await generateRagAnswer({
         question: cleanMessage,
         context: "",
+        conversationHistory,
       })
     } else if (!context.trim()) {
       // Knowledge base attached but no relevant chunks found
@@ -404,6 +415,7 @@ if (recentDuplicate) {
       answer = await generateRagAnswer({
         question: cleanMessage,
         context,
+        conversationHistory,
       })
     }
 
@@ -419,6 +431,10 @@ if (recentDuplicate) {
         pageNumber:  result.pageNumber ?? 1,
         score:       result.score,
         knowledgeId: result.knowledgeId,
+        chunkId:     result.id,
+        slideNumber: result.sourceType === "pptx" ? result.pageNumber : undefined,
+        sheetName:   result.sourceType === "xlsx" ? `Sheet ${result.pageNumber}` : undefined,
+        relevanceScore: result.score,
       })
     )
 
@@ -460,6 +476,22 @@ if (recentDuplicate) {
       new Date()
 
     await conversation.save()
+
+    // ── Usage tracking ────────────────────────────────────────────────────────
+    const estimatedTokens = Math.ceil((cleanMessage.length + answer.length) / 4)
+    await Promise.all([
+      trackGeneration(userId),
+      trackRequest(userId, estimatedTokens),
+    ])
+
+    // ── Request log for analytics telemetry ──────────────────────────────────
+    RequestLog.create({
+      userId: new mongoose.Types.ObjectId(userId),
+      modelName: process.env.GEMINI_MODEL || "gemini-2.0-flash",
+      durationMs: 0,  // non-streaming: duration not captured; use RequestLog from v1/stream
+      tokensEstimate: estimatedTokens,
+      endpoint: "chat",
+    }).catch(() => {/* non-critical */})
 
     // --------------------------------------------------
     // RESPONSE
@@ -508,6 +540,12 @@ export const sendChatMessageStream = async (
         success: false,
         message: "Authentication required",
       })
+    }
+
+    // ── Plan quota check ──────────────────────────────────────────────────────
+    const genCheck = await checkLimits(userId, "aiGenerations")
+    if (!genCheck.allowed) {
+      return res.status(403).json({ success: false, message: genCheck.message })
     }
 
     const conversationId = req.params.conversationId as string
@@ -588,6 +626,10 @@ export const sendChatMessageStream = async (
       pageNumber:  result.pageNumber ?? 1,
       score:       result.score,
       knowledgeId: result.knowledgeId,
+      chunkId:     result.id,
+      slideNumber: result.sourceType === "pptx" ? result.pageNumber : undefined,
+      sheetName:   result.sourceType === "xlsx" ? `Sheet ${result.pageNumber}` : undefined,
+      relevanceScore: result.score,
     }))
 
     // Setup SSE Headers
@@ -601,12 +643,14 @@ export const sendChatMessageStream = async (
 
     let answer = ""
     let responseStream
+    const { conversationHistory } = await buildMemoryContext(conversationId, userId)
 
     if (!conversation.knowledgeId) {
       console.log(`[LLM] Generating general answer (no document context).`)
       responseStream = await generateRagAnswerStream({
         question: cleanMessage,
         context: "",
+        conversationHistory,
         model,
       })
     } else if (!context.trim()) {
@@ -617,6 +661,7 @@ export const sendChatMessageStream = async (
       responseStream = await generateRagAnswerStream({
         question: cleanMessage,
         context,
+        conversationHistory,
         model,
       })
     }
@@ -624,7 +669,7 @@ export const sendChatMessageStream = async (
     if (responseStream) {
       try {
         for await (const chunk of responseStream) {
-          const chunkText = chunk.text || ""
+          const chunkText = chunk || ""
           answer += chunkText
           res.write(`data: ${JSON.stringify({ type: "content", text: chunkText })}\n\n`)
         }
@@ -655,6 +700,22 @@ export const sendChatMessageStream = async (
 
     conversation.updatedAt = new Date()
     await conversation.save()
+
+    // ── Usage tracking ────────────────────────────────────────────────────────
+    const estimatedTokens = Math.ceil((cleanMessage.length + answer.length) / 4)
+    await Promise.all([
+      trackGeneration(userId),
+      trackRequest(userId, estimatedTokens),
+    ]).catch(() => {/* non-critical — do not block SSE stream close */})
+
+    // ── Request log for analytics telemetry ──────────────────────────────────
+    RequestLog.create({
+      userId: new mongoose.Types.ObjectId(userId),
+      modelName: model || process.env.GEMINI_MODEL || "gemini-2.0-flash",
+      durationMs: 0,  // streaming duration tracking requires middleware instrumentation
+      tokensEstimate: estimatedTokens,
+      endpoint: "chat/stream",
+    }).catch(() => {/* non-critical */})
 
     // Send final done event
     res.write(`data: ${JSON.stringify({ type: "done", assistantMessage, conversation })}\n\n`)

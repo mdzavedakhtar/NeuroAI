@@ -2,6 +2,7 @@ import "dotenv/config"
 
 import { Pinecone } from "@pinecone-database/pinecone"
 import KnowledgeChunk from "../models/KnowledgeChunk"
+import { getCache, setCache } from "./redis.cache.service"
 
 const apiKey = process.env.PINECONE_API_KEY
 const indexName = process.env.PINECONE_INDEX_NAME
@@ -377,6 +378,13 @@ export const searchKnowledge = async ({
 
   console.log(`[RETRIEVAL] Initiating vector search. User: ${userId}, Document ID Filter: ${knowledgeId || "None"}, TopK: ${topK}`)
 
+  const cacheKey = `cache:user:${userId}:search:${knowledgeId || "all"}:${cleanQuery}:${topK}`
+  const cached = await getCache<KnowledgeSearchResult[]>(cacheKey)
+  if (cached) {
+    console.log(`[CACHE] Cache HIT for semantic search. Key: ${cacheKey}`)
+    return cached
+  }
+
   const index = await getPineconeIndex()
 
   // ----------------------------------------------------
@@ -484,9 +492,10 @@ export const searchKnowledge = async ({
 
   if (results.length > 0) {
     const matchedDocs = Array.from(new Set(results.map(r => r.knowledgeId)))
-    console.log(`[RETRIEVAL] Retrieved chunks map to Document IDs: [${matchedDocs.join(", ")}]`)
+    console.log(`[RETRIEVAL] Retrieved Chunks map to Document IDs: [${matchedDocs.join(", ")}]`)
   }
 
+  await setCache(cacheKey, results, 300)
   return results
 }
 

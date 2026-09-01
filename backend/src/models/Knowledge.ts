@@ -8,6 +8,10 @@ import mongoose, {
 export type KnowledgeStatus =
   | "uploaded"
   | "processing"
+  | "parsing"
+  | "chunking"
+  | "vector_indexing"
+  | "graph_indexing"
   | "ready"
   | "failed"
 
@@ -20,11 +24,13 @@ export interface IKnowledge extends Document {
   path: string
 
   status: KnowledgeStatus
+  currentStep?: string
+  errorMessage?: string
+  retryCount?: number
+  lastAttemptAt?: Date
 
   chunks: number
   characters: number
-
-  errorMessage?: string
 
   createdAt: Date
   updatedAt: Date
@@ -71,11 +77,34 @@ const knowledgeSchema = new Schema<IKnowledge>(
       enum: [
         "uploaded",
         "processing",
+        "parsing",
+        "chunking",
+        "vector_indexing",
+        "graph_indexing",
         "ready",
         "failed",
       ],
       default: "uploaded",
       index: true,
+    },
+
+    currentStep: {
+      type: String,
+      default: "uploaded",
+    },
+
+    errorMessage: {
+      type: String,
+      default: "",
+    },
+
+    retryCount: {
+      type: Number,
+      default: 0,
+    },
+
+    lastAttemptAt: {
+      type: Date,
     },
 
     chunks: {
@@ -88,11 +117,6 @@ const knowledgeSchema = new Schema<IKnowledge>(
       type: Number,
       default: 0,
       min: 0,
-    },
-
-    errorMessage: {
-      type: String,
-      default: "",
     },
   },
   {
