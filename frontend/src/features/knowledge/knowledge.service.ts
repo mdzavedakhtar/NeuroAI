@@ -71,3 +71,20 @@ export async function deleteKnowledgeSource(knowledgeId: string) {
     method: "DELETE",
   })
 }
+
+export async function getKnowledgeStatus(knowledgeId: string) {
+  return apiFetch<{
+    success: boolean
+    knowledge: {
+      id: string
+      originalName: string
+      mimeType: string
+      size: number
+      status: string
+      currentStep?: string
+      errorMessage?: string
+      chunks?: number
+      createdAt: string
+    }
+  }>(`/knowledge/${knowledgeId}`)
+}

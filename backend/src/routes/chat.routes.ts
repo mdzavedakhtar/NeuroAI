@@ -13,6 +13,7 @@ import {
   getConversations,
   getConversationMessages,
   deleteConversation,
+  updateConversation,
   sendChatMessage,
   sendChatMessageStream,
 } from "../controllers/chat.controller"
@@ -32,6 +33,12 @@ router.post(
 router.get(
   "/conversations",
   getConversations
+)
+
+// Update conversation title
+router.put(
+  "/conversations/:conversationId",
+  updateConversation
 )
 
 // Get complete chat history

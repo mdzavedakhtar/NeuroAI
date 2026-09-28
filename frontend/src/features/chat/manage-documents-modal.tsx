@@ -1,4 +1,4 @@
-﻿"use client"
+"use client"
 
 import { useEffect, useRef, useState } from "react"
 import {
@@ -25,6 +25,7 @@ import {
   uploadKnowledge,
   indexKnowledge,
   extractKnowledgeId,
+  getKnowledgeStatus,
 } from "@/features/knowledge/knowledge.service"
 import { cn } from "@/lib/utils"
 import { apiFetch } from "@/services/api"
@@ -175,6 +176,33 @@ export function ManageDocumentsModal({
         if (!knowledgeId) throw new Error("Missing knowledge ID from upload response.")
         updateFileStatus(item.id, "indexing", "Indexing content...")
         await indexKnowledge(knowledgeId)
+
+        // Poll for backend completion
+        let attempts = 0
+        const maxAttempts = 30
+        let isReady = false
+
+        while (attempts < maxAttempts) {
+          attempts++
+          await new Promise((res) => setTimeout(res, 1000))
+          try {
+            const statusRes = await getKnowledgeStatus(knowledgeId)
+            const currentDoc = statusRes?.knowledge
+            if (currentDoc?.status === "ready" || currentDoc?.status === "completed") {
+              isReady = true
+              break
+            } else if (currentDoc?.status === "failed") {
+              throw new Error(currentDoc.errorMessage || "Document processing failed.")
+            } else if (currentDoc?.currentStep) {
+              updateFileStatus(item.id, "indexing", `${currentDoc.currentStep}...`)
+            }
+          } catch (pollErr: any) {
+            if (pollErr.message && pollErr.message.includes("failed")) {
+              throw pollErr
+            }
+          }
+        }
+
         updateFileStatus(item.id, "complete", "Indexed successfully")
         await loadSources()
       } catch (err) {

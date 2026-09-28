@@ -18,6 +18,8 @@ import {
   X,
   Code,
   BarChart3,
+  Sparkles,
+  Pencil,
 } from "lucide-react"
 import ReactMarkdown from "react-markdown"
 import remarkGfm from "remark-gfm"
@@ -37,11 +39,13 @@ import {
   getConversations,
   getMessages,
   sendMessage,
+  updateConversation,
 } from "./chat.service"
 import {
   uploadKnowledge,
   indexKnowledge,
   extractKnowledgeId,
+  getKnowledgeStatus,
 } from "@/features/knowledge/knowledge.service"
 import {
   logout,
@@ -164,6 +168,39 @@ export function ChatWorkspace() {
     setInput("")
   }
 
+  // Inline Rename State
+  const [editingChatId, setEditingChatId] = useState<string | null>(null)
+  const [editingTitle, setEditingTitle] = useState("")
+
+  function handleStartRename(conv: Conversation, e: React.MouseEvent) {
+    e.stopPropagation()
+    setEditingChatId(conv._id)
+    setEditingTitle(conv.title)
+  }
+
+  async function handleSaveRename(convId: string, e?: React.FormEvent) {
+    if (e) e.preventDefault()
+    const trimmed = editingTitle.trim()
+    if (!trimmed) {
+      setEditingChatId(null)
+      return
+    }
+    try {
+      await updateConversation(convId, trimmed)
+      setConversations((prev) =>
+        prev.map((c) => (c._id === convId ? { ...c, title: trimmed } : c))
+      )
+      if (activeConversation?._id === convId) {
+        setActiveConversation((prev) => (prev ? { ...prev, title: trimmed } : prev))
+      }
+      toast.success("Chat renamed.")
+    } catch {
+      toast.error("Failed to rename chat.")
+    } finally {
+      setEditingChatId(null)
+    }
+  }
+
   async function handleDeleteChat(conv: Conversation, e: React.MouseEvent) {
     e.stopPropagation()
     if (sendingRef.current) return
@@ -212,16 +249,20 @@ export function ChatWorkspace() {
     try {
       const uploadRes = await uploadKnowledge(file)
       const knowledgeId = extractKnowledgeId(uploadRes)
-      if (!knowledgeId) throw new Error("Could not index document.")
+      if (!knowledgeId) throw new Error("Could not upload file.")
 
-      setAttachment({ file, knowledgeId, status: "indexing", progressMessage: "Indexing..." })
-      await indexKnowledge(knowledgeId)
+      // Instantly mark attachment ready so user can send question without waiting
       setAttachment({ file, knowledgeId, status: "ready", progressMessage: "Ready" })
-      toast.success(`${file.name} indexed successfully.`)
-    } catch (err) {
+      toast.success(`${file.name} attached successfully.`)
+
+      // Trigger background indexing
+      indexKnowledge(knowledgeId).catch((err) => {
+        console.warn("[ATTACHMENT] Background indexing trigger error:", err)
+      })
+    } catch (err: any) {
       console.error(err)
       setAttachment({ file, knowledgeId: "", status: "error", progressMessage: "Failed" })
-      toast.error(`Failed to process ${file.name}`)
+      toast.error(err.message || `Failed to upload ${file.name}`)
     } finally {
       e.target.value = ""
     }
@@ -296,12 +337,29 @@ export function ChatWorkspace() {
       })
 
       if (!response.ok) {
-        throw new Error("Failed to start message stream")
+        let errorMsg = "Failed to start message stream"
+        try {
+          const errData = await response.json()
+          if (errData && errData.message) {
+            errorMsg = errData.message
+          }
+        } catch {
+          // ignore parsing error if response body is not JSON
+        }
+        toast.error(errorMsg)
+        setIsStreaming(false)
+        setStreamingText("")
+        setStreamingSources([])
+        return
       }
 
       const reader = response.body?.getReader()
       const decoder = new TextDecoder()
-      if (!reader) throw new Error("No response reader")
+      if (!reader) {
+        toast.error("No response stream reader available")
+        setIsStreaming(false)
+        return
+      }
 
       let accumulated = ""
       setIsStreaming(true)
@@ -475,12 +533,12 @@ export function ChatWorkspace() {
   const userInitial = userProfile?.name?.charAt(0).toUpperCase() || "U"
 
   return (
-    <div className="flex h-screen w-screen overflow-hidden bg-[#212121] text-[#ececec]" style={{ fontFamily: "Inter, system-ui, sans-serif" }}>
+    <div className="flex h-screen w-screen overflow-hidden bg-[#090a10] text-[#ececec]" style={{ fontFamily: "Inter, system-ui, sans-serif" }}>
       
       {/* Mobile sidebar backdrop */}
       {isMobile && sidebarOpen && (
         <div
-          className="fixed inset-0 z-20 bg-black/50"
+          className="fixed inset-0 z-20 bg-black/60 backdrop-blur-sm"
           onClick={() => setSidebarOpen(false)}
         />
       )}
@@ -490,41 +548,51 @@ export function ChatWorkspace() {
           ================================================================ */}
       <aside
         className={cn(
-          "bg-[#171717] h-full flex flex-col shrink-0 transition-all duration-300 ease-in-out z-30 overflow-hidden",
+          "bg-[#0e1017] border-r border-white/[0.08] h-full flex flex-col shrink-0 transition-all duration-300 ease-in-out z-30 overflow-hidden",
           isMobile
             ? cn("fixed top-0 left-0 h-full", sidebarOpen ? "w-[280px] shadow-2xl" : "w-0")
             : cn(sidebarOpen ? "w-[260px]" : "w-0")
         )}
       >
         {/* Sidebar Top Actions */}
-        <div className="flex items-center justify-between px-3 pt-3 pb-2 gap-1">
-          {/* Toggle sidebar close */}
-          <button
-            onClick={() => setSidebarOpen(false)}
-            className="p-2 rounded-lg text-[#8e8e8e] hover:text-[#ececec] hover:bg-white/10 transition-colors"
-            title="Close sidebar"
-          >
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <rect x="3" y="3" width="18" height="18" rx="2" />
-              <path d="M9 3v18" />
-            </svg>
-          </button>
+        <div className="flex items-center justify-between px-3 pt-3 pb-2.5 gap-1 border-b border-white/[0.06]">
+          {/* Brand */}
+          <div className="flex items-center gap-2 px-1">
+            <div className="size-6 rounded-lg bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center">
+              <Sparkles className="size-3.5 text-emerald-400" />
+            </div>
+            <span className="text-xs font-bold text-white tracking-wide">NeuroStack AI</span>
+          </div>
 
-          {/* New Chat button */}
-          <button
-            onClick={handleNewChat}
-            className="p-2 rounded-lg text-[#8e8e8e] hover:text-[#ececec] hover:bg-white/10 transition-colors ml-auto"
-            title="New chat"
-          >
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
-              <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
-            </svg>
-          </button>
+          <div className="flex items-center gap-1">
+            {/* New Chat button */}
+            <button
+              onClick={handleNewChat}
+              className="p-1.5 rounded-lg text-gray-400 hover:text-white hover:bg-white/10 transition-colors cursor-pointer"
+              title="New chat"
+            >
+              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+                <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+              </svg>
+            </button>
+
+            {/* Toggle sidebar close */}
+            <button
+              onClick={() => setSidebarOpen(false)}
+              className="p-1.5 rounded-lg text-gray-400 hover:text-white hover:bg-white/10 transition-colors cursor-pointer"
+              title="Close sidebar"
+            >
+              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="3" y="3" width="18" height="18" rx="2" />
+                <path d="M9 3v18" />
+              </svg>
+            </button>
+          </div>
         </div>
 
         {/* Conversations History */}
-        <div className="flex-1 overflow-y-auto px-2 py-1">
+        <div className="flex-1 overflow-y-auto px-2 py-2">
           {loadingHistory ? (
             <div className="flex items-center justify-center py-10">
               <Loader2 className="size-4 animate-spin text-[#8e8e8e]" />
@@ -535,33 +603,82 @@ export function ChatWorkspace() {
             <div className="space-y-4">
               {Object.entries(groupConversations(conversations)).map(([groupName, groupChats]) => (
                 <div key={groupName} className="space-y-0.5">
-                  <h3 className="px-3 pt-3 pb-1 text-[11px] font-semibold text-[#8e8e8e] uppercase tracking-wider select-none">
+                  <h3 className="px-3 pt-3 pb-1 text-[10.5px] font-bold text-gray-500 uppercase tracking-wider select-none">
                     {groupName}
                   </h3>
                   {groupChats.map((conv) => {
                     const isActive = activeConversation?._id === conv._id
+                    const isEditing = editingChatId === conv._id
+
                     return (
                       <div
                         key={conv._id}
                         onClick={() => {
-                          void handleSelectConversation(conv)
-                          if (isMobile) setSidebarOpen(false)
+                          if (!isEditing) {
+                            void handleSelectConversation(conv)
+                            if (isMobile) setSidebarOpen(false)
+                          }
                         }}
                         className={cn(
-                          "group relative flex items-center justify-between rounded-lg px-3 py-2 text-sm cursor-pointer select-none transition-colors",
+                          "group relative flex items-center justify-between rounded-xl px-3 py-2 text-sm cursor-pointer select-none transition-all",
                           isActive
-                            ? "bg-white/10 text-[#ececec]"
-                            : "text-[#8e8e8e] hover:bg-white/5 hover:text-[#ececec]"
+                            ? "bg-emerald-500/10 text-white font-medium border-l-2 border-emerald-400 shadow-sm"
+                            : "text-gray-400 hover:bg-white/5 hover:text-white"
                         )}
                       >
-                        <span className="truncate pr-6 text-[13.5px]">{conv.title}</span>
-                        <button
-                          onClick={(e) => void handleDeleteChat(conv, e)}
-                          className="absolute right-2 opacity-0 group-hover:opacity-100 text-[#8e8e8e] hover:text-red-400 transition-all p-0.5 rounded"
-                          title="Delete chat"
-                        >
-                          <Trash2 className="size-3.5" />
-                        </button>
+                        {isEditing ? (
+                          <form
+                            onSubmit={(e) => void handleSaveRename(conv._id, e)}
+                            onClick={(e) => e.stopPropagation()}
+                            className="flex items-center gap-1 w-full"
+                          >
+                            <input
+                              type="text"
+                              autoFocus
+                              value={editingTitle}
+                              onChange={(e) => setEditingTitle(e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === "Escape") setEditingChatId(null)
+                              }}
+                              className="w-full bg-[#161822] border border-emerald-500/50 rounded-lg px-2 py-0.5 text-xs text-white outline-none focus:ring-1 focus:ring-emerald-500"
+                            />
+                            <button
+                              type="submit"
+                              className="p-1 text-emerald-400 hover:text-emerald-300 transition-colors cursor-pointer"
+                              title="Save title"
+                            >
+                              <Check className="size-3.5" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setEditingChatId(null)}
+                              className="p-1 text-gray-400 hover:text-gray-200 transition-colors cursor-pointer"
+                              title="Cancel"
+                            >
+                              <X className="size-3.5" />
+                            </button>
+                          </form>
+                        ) : (
+                          <>
+                            <span className="truncate pr-14 text-[13px]">{conv.title}</span>
+                            <div className="absolute right-2 flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                              <button
+                                onClick={(e) => handleStartRename(conv, e)}
+                                className="text-gray-400 hover:text-emerald-400 transition-all p-1 rounded-md cursor-pointer"
+                                title="Rename chat"
+                              >
+                                <Pencil className="size-3.5" />
+                              </button>
+                              <button
+                                onClick={(e) => void handleDeleteChat(conv, e)}
+                                className="text-gray-400 hover:text-red-400 transition-all p-1 rounded-md cursor-pointer"
+                                title="Delete chat"
+                              >
+                                <Trash2 className="size-3.5" />
+                              </button>
+                            </div>
+                          </>
+                        )}
                       </div>
                     )
                   })}
@@ -572,21 +689,21 @@ export function ChatWorkspace() {
         </div>
 
         {/* Sidebar Footer */}
-        <div className="border-t border-white/[0.08] p-2 space-y-0.5">
+        <div className="border-t border-white/[0.08] p-2 space-y-0.5 bg-[#0b0c13]">
           {/* Email verification banner */}
           {userProfile && userProfile.isEmailVerified === false && (
-            <div className="mx-0.5 mb-1 rounded-lg bg-[#3a2d12] border border-[#8a6d1f]/40 px-3 py-2">
-              <p className="text-[11px] font-medium text-[#e6c35c]">
+            <div className="mx-0.5 mb-1.5 rounded-xl bg-amber-500/10 border border-amber-500/25 px-3 py-2">
+              <p className="text-[11px] font-semibold text-amber-400">
                 Verify your email
               </p>
-              <p className="mt-0.5 text-[10.5px] text-[#8e8e8e]">
-                Some features stay locked until your email is confirmed.
+              <p className="mt-0.5 text-[10.5px] text-gray-400 leading-tight">
+                Some features stay locked until verified.
               </p>
               <button
                 onClick={() => void handleResendVerification()}
-                className="mt-1 text-[11px] text-[#e6c35c] hover:underline cursor-pointer"
+                className="mt-1 text-[11px] text-amber-300 hover:underline cursor-pointer font-medium"
               >
-                Resend verification email
+                Resend verification link
               </button>
             </div>
           )}
@@ -594,71 +711,71 @@ export function ChatWorkspace() {
           {/* Graph Explorer */}
           <button
             onClick={() => router.push("/dashboard/graph")}
-            className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-[#8e8e8e] hover:bg-white/5 hover:text-[#ececec] transition-colors text-[13.5px]"
+            className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-gray-400 hover:bg-white/5 hover:text-white transition-colors text-xs font-medium cursor-pointer"
           >
-            <Share2 className="size-4 shrink-0" />
+            <Share2 className="size-4 shrink-0 text-emerald-400/80" />
             <span>Graph Explorer</span>
           </button>
 
           {/* Settings */}
           <button
             onClick={() => router.push("/dashboard/settings")}
-            className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-[#8e8e8e] hover:bg-white/5 hover:text-[#ececec] transition-colors text-[13.5px]"
+            className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-gray-400 hover:bg-white/5 hover:text-white transition-colors text-xs font-medium cursor-pointer"
           >
-            <Settings className="size-4 shrink-0" />
+            <Settings className="size-4 shrink-0 text-cyan-400/80" />
             <span>Settings</span>
           </button>
 
           {/* Developer Platform */}
           <button
             onClick={() => router.push("/dashboard/developer")}
-            className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-[#8e8e8e] hover:bg-white/5 hover:text-[#ececec] transition-colors text-[13.5px]"
+            className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-gray-400 hover:bg-white/5 hover:text-white transition-colors text-xs font-medium cursor-pointer"
           >
-            <Code className="size-4 shrink-0" />
+            <Code className="size-4 shrink-0 text-indigo-400/80" />
             <span>Developer Platform</span>
           </button>
 
           {/* Analytics Console */}
           <button
             onClick={() => router.push("/dashboard/analytics")}
-            className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-[#8e8e8e] hover:bg-white/5 hover:text-[#ececec] transition-colors text-[13.5px]"
+            className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-gray-400 hover:bg-white/5 hover:text-white transition-colors text-xs font-medium cursor-pointer"
           >
-            <BarChart3 className="size-4 shrink-0" />
+            <BarChart3 className="size-4 shrink-0 text-purple-400/80" />
             <span>Analytics Console</span>
           </button>
 
           {/* Document Library */}
           <button
             onClick={() => setDocModalOpen(true)}
-            className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-[#8e8e8e] hover:bg-white/5 hover:text-[#ececec] transition-colors text-[13.5px]"
+            className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-gray-400 hover:bg-white/5 hover:text-white transition-colors text-xs font-medium cursor-pointer"
           >
-            <Database className="size-4 shrink-0" />
+            <Database className="size-4 shrink-0 text-teal-400/80" />
             <span>Document Library</span>
           </button>
 
           {/* User Profile */}
           <DropdownMenu>
-            <DropdownMenuTrigger className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-white/5 transition-colors text-left cursor-pointer select-none bg-transparent border-0 outline-none">
-              <div className="size-8 rounded-full bg-[#19c37d] flex items-center justify-center text-white text-sm font-semibold shrink-0">
+            <DropdownMenuTrigger className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-white/5 transition-colors text-left cursor-pointer select-none bg-transparent border-0 outline-none">
+              <div className="size-8 rounded-xl bg-gradient-to-tr from-emerald-500 to-teal-400 flex items-center justify-center text-black font-bold text-xs shrink-0 shadow-md">
                 {userInitial}
               </div>
               <div className="min-w-0 flex-1">
-                <p className="truncate text-[13.5px] font-medium text-[#ececec]">
+                <p className="truncate text-xs font-semibold text-white">
                   {userProfile?.name || "User"}
                 </p>
-                <p className="truncate text-[11px] text-[#8e8e8e]">
+                <p className="truncate text-[10.5px] text-gray-400">
                   {userProfile?.email || ""}
                 </p>
               </div>
             </DropdownMenuTrigger>
             <DropdownMenuContent
-              className="w-56 bg-[#2f2f2f] border-white/10 text-[#ececec] p-1 rounded-xl shadow-2xl"
+              className="w-56 bg-[#161822] border-white/10 text-white p-1 rounded-xl shadow-2xl z-50"
               side="top"
               align="start"
             >
               <DropdownMenuItem
                 onClick={handleLogout}
-                className="flex items-center gap-2.5 px-3 py-2 rounded-lg cursor-pointer text-[13.5px] text-red-400 hover:bg-white/5 hover:text-red-400 focus:bg-white/5 focus:text-red-400"
+                className="flex items-center gap-2.5 px-3 py-2 rounded-lg cursor-pointer text-xs text-red-400 hover:bg-white/5 hover:text-red-400 focus:bg-white/5 focus:text-red-400"
               >
                 <LogOut className="size-4" />
                 Log out
@@ -671,15 +788,17 @@ export function ChatWorkspace() {
       {/* ================================================================
           MAIN CHAT AREA
           ================================================================ */}
-      <main className="flex-1 flex flex-col h-full bg-[#212121] relative overflow-hidden">
+      <main className="flex-1 flex flex-col h-full bg-[#090a10] relative overflow-hidden">
+        {/* Background Ambient Glow */}
+        <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[600px] h-[300px] bg-emerald-500/[0.03] rounded-full blur-[140px] pointer-events-none" />
         
         {/* Top Navbar Header */}
-        <header className="h-14 flex items-center justify-between border-b border-white/[0.08] bg-[#212121] px-4 select-none shrink-0">
+        <header className="h-14 flex items-center justify-between border-b border-white/[0.08] bg-[#0d0f16]/80 backdrop-blur-xl px-4 select-none shrink-0 z-10">
           <div className="flex items-center gap-2">
             {!sidebarOpen && (
               <button
                 onClick={() => setSidebarOpen(true)}
-                className="p-2 rounded-lg text-[#8e8e8e] hover:text-[#ececec] hover:bg-white/10 transition-colors cursor-pointer"
+                className="p-2 rounded-xl text-gray-400 hover:text-white hover:bg-white/10 transition-colors cursor-pointer"
                 title="Open sidebar"
               >
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -691,30 +810,31 @@ export function ChatWorkspace() {
 
             {/* Model Selector Dropdown */}
             <DropdownMenu>
-              <DropdownMenuTrigger className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl hover:bg-white/5 transition-colors text-[14px] font-semibold text-[#8e8e8e] hover:text-[#ececec] bg-transparent border-0 outline-none cursor-pointer">
-                <span>{activeModel === "gemini-2.0-flash" ? "Gemini 2.0 Flash" : "Gemini 3.5 Flash"}</span>
-                <ChevronDown className="size-3.5" />
+              <DropdownMenuTrigger className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl hover:bg-white/5 transition-colors text-xs font-semibold text-gray-300 hover:text-white bg-transparent border border-white/10 cursor-pointer">
+                <Sparkles className="size-3.5 text-emerald-400" />
+                <span>{activeModel === "gemini-2.0-flash" ? "Gemini 2.0 Flash" : "Gemini 1.5 Flash"}</span>
+                <ChevronDown className="size-3.5 opacity-60" />
               </DropdownMenuTrigger>
-              <DropdownMenuContent className="w-52 bg-[#2f2f2f] border-white/10 text-[#ececec] p-1 rounded-xl shadow-2xl z-50">
+              <DropdownMenuContent className="w-56 bg-[#161822] border-white/10 text-white p-1 rounded-xl shadow-2xl z-50">
                 <DropdownMenuItem
                   onClick={() => setActiveModel("gemini-2.0-flash")}
                   className={cn(
-                    "flex flex-col items-start gap-0.5 px-3 py-2 rounded-lg cursor-pointer text-[13px] hover:bg-white/5 focus:bg-white/5",
-                    activeModel === "gemini-2.0-flash" && "bg-white/5 text-[#ececec]"
+                    "flex flex-col items-start gap-0.5 px-3 py-2 rounded-lg cursor-pointer text-xs hover:bg-white/5 focus:bg-white/5",
+                    activeModel === "gemini-2.0-flash" && "bg-white/5 text-emerald-400 font-semibold"
                   )}
                 >
-                  <span className="font-semibold text-[13px]">Gemini 2.0 Flash</span>
-                  <span className="text-[10px] text-[#8e8e8e] leading-tight mt-0.5">High speed general reasoning & coding</span>
+                  <span className="font-semibold text-xs">Gemini 2.0 Flash</span>
+                  <span className="text-[10px] text-gray-400 leading-tight mt-0.5">High speed general reasoning & coding</span>
                 </DropdownMenuItem>
                 <DropdownMenuItem
-                  onClick={() => setActiveModel("gemini-3.5-flash")}
+                  onClick={() => setActiveModel("gemini-1.5-flash")}
                   className={cn(
-                    "flex flex-col items-start gap-0.5 px-3 py-2 rounded-lg cursor-pointer text-[13px] hover:bg-white/5 focus:bg-white/5",
-                    activeModel === "gemini-3.5-flash" && "bg-white/5 text-[#ececec]"
+                    "flex flex-col items-start gap-0.5 px-3 py-2 rounded-lg cursor-pointer text-xs hover:bg-white/5 focus:bg-white/5",
+                    activeModel === "gemini-1.5-flash" && "bg-white/5 text-emerald-400 font-semibold"
                   )}
                 >
-                  <span className="font-semibold text-[13px]">Gemini 3.5 Flash</span>
-                  <span className="text-[10px] text-[#8e8e8e] leading-tight mt-0.5">Balanced speed & reasoning</span>
+                  <span className="font-semibold text-xs">Gemini 1.5 Flash</span>
+                  <span className="text-[10px] text-gray-400 leading-tight mt-0.5">Balanced speed & reasoning</span>
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
@@ -724,10 +844,10 @@ export function ChatWorkspace() {
             {messages.length > 0 && (
               <button
                 onClick={handleExportChat}
-                className="flex items-center gap-2 px-3 py-2 rounded-lg text-[#8e8e8e] hover:text-[#ececec] hover:bg-white/10 transition-colors text-[13px] font-medium cursor-pointer"
+                className="flex items-center gap-2 px-3 py-1.5 rounded-xl border border-white/10 text-gray-400 hover:text-white hover:bg-white/10 transition-colors text-xs font-medium cursor-pointer"
                 title="Export Chat as Markdown"
               >
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
                   <polyline points="7 10 12 15 17 10" />
                   <line x1="12" y1="15" x2="12" y2="3" />
@@ -740,21 +860,27 @@ export function ChatWorkspace() {
 
         {/* Message Thread */}
         <div className="flex-1 overflow-y-auto w-full">
-          <div className="max-w-3xl mx-auto px-4 py-8 space-y-1">
+          <div className="max-w-3xl mx-auto px-4 py-8 space-y-2">
             
             {/* Empty state */}
             {messages.length === 0 && !isStreaming && (
-              <div className="flex flex-col items-center justify-center text-center pt-32 pb-8">
-                <h1 className="text-[28px] font-semibold text-[#ececec] mb-2">
-                  What can I help with?
+              <div className="flex flex-col items-center justify-center text-center pt-28 pb-8">
+                <div className="size-12 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center mb-4 shadow-lg shadow-emerald-500/10">
+                  <Sparkles className="size-6 text-emerald-400 animate-pulse" />
+                </div>
+                <h1 className="text-2xl sm:text-3xl font-bold text-white mb-2 tracking-tight">
+                  What can I help with today?
                 </h1>
+                <p className="text-xs sm:text-sm text-gray-400 max-w-md">
+                  Upload document intelligence or ask anything grounded in your knowledge base.
+                </p>
               </div>
             )}
 
             {/* Messages */}
-            <div className="space-y-0">
+            <div className="space-y-4">
               {messages.map((msg, index) => (
-                <MessageRow key={index} msg={msg} conversationId={activeConversation?._id} userInitial={userInitial} />
+                <MessageRow key={index} msg={msg} conversationId={activeConversation?._id} />
               ))}
 
               {/* Streaming message */}
@@ -762,25 +888,18 @@ export function ChatWorkspace() {
                 <MessageRow
                   msg={{ role: "assistant", content: streamingText, sources: streamingSources }}
                   isStreaming
-                  userInitial={userInitial}
                 />
               )}
 
               {/* Thinking indicator */}
               {loading && !isStreaming && (
-                <div className="py-4 px-4">
-                  <div className="max-w-3xl mx-auto flex gap-4 items-start">
-                    <div className="size-8 rounded-full bg-white flex items-center justify-center shrink-0 mt-0.5">
-                      <svg width="16" height="16" viewBox="0 0 41 41" fill="none" xmlns="http://www.w3.org/2000/svg">
-                        <path d="M37.532 16.87a9.963 9.963 0 0 0-.856-8.184 10.078 10.078 0 0 0-10.855-4.835 9.964 9.964 0 0 0-7.505-3.348 10.079 10.079 0 0 0-9.614 6.977 9.967 9.967 0 0 0-6.664 4.834 10.08 10.08 0 0 0 1.24 11.817 9.965 9.965 0 0 0 .856 8.185 10.079 10.079 0 0 0 10.855 4.835 9.965 9.965 0 0 0 7.504 3.347 10.078 10.078 0 0 0 9.617-6.981 9.967 9.967 0 0 0 6.663-4.834 10.079 10.079 0 0 0-1.243-11.813z" fill="#000"/>
-                      </svg>
-                    </div>
-                    <div className="pt-2">
-                      <div className="flex gap-1">
-                        <span className="w-2 h-2 bg-[#8e8e8e] rounded-full animate-bounce" style={{ animationDelay: "0ms" }} />
-                        <span className="w-2 h-2 bg-[#8e8e8e] rounded-full animate-bounce" style={{ animationDelay: "150ms" }} />
-                        <span className="w-2 h-2 bg-[#8e8e8e] rounded-full animate-bounce" style={{ animationDelay: "300ms" }} />
-                      </div>
+                <div className="py-3 px-2 my-2">
+                  <div className="flex items-center gap-2 text-gray-400 text-xs">
+                    <Sparkles className="size-4 text-emerald-400 animate-pulse" />
+                    <div className="flex gap-1.5 items-center">
+                      <span className="w-2 h-2 bg-emerald-400 rounded-full animate-bounce" style={{ animationDelay: "0ms" }} />
+                      <span className="w-2 h-2 bg-emerald-400 rounded-full animate-bounce" style={{ animationDelay: "150ms" }} />
+                      <span className="w-2 h-2 bg-emerald-400 rounded-full animate-bounce" style={{ animationDelay: "300ms" }} />
                     </div>
                   </div>
                 </div>
@@ -796,27 +915,27 @@ export function ChatWorkspace() {
           <div className="max-w-3xl mx-auto">
             {/* Attachment preview */}
             {attachment && (
-              <div className="mb-3 flex items-center justify-between gap-3 bg-[#2f2f2f] border border-white/10 px-3.5 py-2.5 rounded-xl text-xs">
+              <div className="mb-3 flex items-center justify-between gap-3 bg-[#141722] border border-white/10 px-4 py-2.5 rounded-2xl text-xs backdrop-blur-xl">
                 <div className="flex items-center gap-2.5 min-w-0">
-                  <FileText className="size-4 text-[#19c37d] shrink-0" />
-                  <span className="truncate font-medium text-[#ececec]">{attachment.file.name}</span>
-                  <span className="text-[10px] text-[#8e8e8e]">({formatBytes(attachment.file.size)})</span>
+                  <FileText className="size-4 text-emerald-400 shrink-0" />
+                  <span className="truncate font-medium text-white">{attachment.file.name}</span>
+                  <span className="text-[10px] text-gray-400">({formatBytes(attachment.file.size)})</span>
                 </div>
                 <div className="flex items-center gap-2.5 shrink-0">
                   {attachment.status === "uploading" || attachment.status === "indexing" ? (
                     <>
-                      <span className="text-[10px] text-[#8e8e8e] animate-pulse">{attachment.progressMessage}</span>
-                      <Loader2 className="size-3.5 animate-spin text-[#19c37d]" />
+                      <span className="text-[10px] text-gray-400 animate-pulse">{attachment.progressMessage}</span>
+                      <Loader2 className="size-3.5 animate-spin text-emerald-400" />
                     </>
                   ) : attachment.status === "ready" ? (
-                    <span className="text-[10px] text-[#19c37d] font-semibold">Ready</span>
+                    <span className="text-[10px] text-emerald-400 font-semibold">Ready</span>
                   ) : (
                     <span className="text-[10px] text-red-400">Failed</span>
                   )}
                   <button
                     onClick={() => setAttachment(null)}
                     disabled={loading}
-                    className="text-[#8e8e8e] hover:text-[#ececec] transition-colors"
+                    className="text-gray-400 hover:text-white transition-colors cursor-pointer"
                   >
                     <X className="size-4" />
                   </button>
@@ -825,7 +944,7 @@ export function ChatWorkspace() {
             )}
 
             {/* Input Box */}
-            <div className="relative rounded-2xl bg-[#2f2f2f] shadow-lg">
+            <div className="relative rounded-2xl bg-[#141722]/90 backdrop-blur-xl border border-white/10 shadow-2xl focus-within:border-emerald-500/40 focus-within:ring-2 focus-within:ring-emerald-500/15 transition-all">
               {/* Hidden file input */}
               <input
                 type="file"
@@ -840,9 +959,9 @@ export function ChatWorkspace() {
                 disabled={loading}
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={handleKeyDown}
-                placeholder="Message NeuroStack AI"
+                placeholder="Message NeuroStack AI..."
                 rows={1}
-                className="w-full min-h-[52px] max-h-[200px] resize-none border-0 bg-transparent py-4 pl-4 pr-24 text-[15px] text-[#ececec] placeholder-[#8e8e8e] shadow-none focus-visible:ring-0 leading-6"
+                className="w-full min-h-[52px] max-h-[200px] resize-none border-0 bg-transparent py-4 pl-4 pr-24 text-[15px] text-white placeholder-gray-500 shadow-none focus-visible:ring-0 leading-6"
               />
 
               {/* Bottom action row */}
@@ -852,7 +971,7 @@ export function ChatWorkspace() {
                   type="button"
                   disabled={loading || attachment !== null}
                   onClick={() => fileInputRef.current?.click()}
-                  className="p-2 rounded-lg text-[#8e8e8e] hover:text-[#ececec] hover:bg-white/10 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                  className="p-2 rounded-xl text-gray-400 hover:text-white hover:bg-white/10 transition-colors disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
                   title="Attach Document"
                 >
                   <Paperclip className="size-4" />
@@ -876,18 +995,18 @@ export function ChatWorkspace() {
                     className={cn(
                       "size-8 rounded-full flex items-center justify-center transition-all",
                       input.trim() || attachment
-                        ? "bg-white text-black hover:bg-white/90 cursor-pointer"
-                        : "bg-[#676767] text-[#8e8e8e] cursor-not-allowed"
+                        ? "bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-black font-bold shadow-lg shadow-emerald-500/25 cursor-pointer"
+                        : "bg-white/10 text-gray-500 cursor-not-allowed"
                     )}
                   >
-                    <Send className="size-4" />
+                    <Send className="size-4 text-black" />
                   </button>
                 )}
               </div>
             </div>
 
-            <p className="text-center text-xs text-[#8e8e8e] mt-3 select-none">
-              NeuroStack AI can make mistakes. Check important info.
+            <p className="text-center text-[11px] text-gray-500 mt-3 select-none">
+              NeuroStack AI can make mistakes. Verify important information.
             </p>
           </div>
         </div>
@@ -907,12 +1026,10 @@ function MessageRow({
   msg,
   conversationId,
   isStreaming = false,
-  userInitial,
 }: {
   msg: ChatMessage
   conversationId?: string
   isStreaming?: boolean
-  userInitial: string
 }) {
   const isAI = msg.role === "assistant"
   const [copied, setCopied] = useState(false)
@@ -927,135 +1044,104 @@ function MessageRow({
     }
   }
 
-  return (
-    <div className="group py-4 px-4">
-      <div className="max-w-3xl mx-auto flex gap-4 items-start">
-        {/* Avatar */}
-        {isAI ? (
-          <div className="size-8 rounded-full bg-white flex items-center justify-center shrink-0 mt-0.5">
-            {/* OpenAI-style logo silhouette */}
-            <svg width="16" height="16" viewBox="0 0 41 41" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <path d="M37.532 16.87a9.963 9.963 0 0 0-.856-8.184 10.078 10.078 0 0 0-10.855-4.835 9.964 9.964 0 0 0-7.505-3.348 10.079 10.079 0 0 0-9.614 6.977 9.967 9.967 0 0 0-6.664 4.834 10.08 10.08 0 0 0 1.24 11.817 9.965 9.965 0 0 0 .856 8.185 10.079 10.079 0 0 0 10.855 4.835 9.965 9.965 0 0 0 7.504 3.347 10.078 10.078 0 0 0 9.617-6.981 9.967 9.967 0 0 0 6.663-4.834 10.079 10.079 0 0 0-1.243-11.813z" fill="#000"/>
-            </svg>
-          </div>
-        ) : (
-          <div className="size-8 rounded-full bg-[#19c37d] flex items-center justify-center text-white text-sm font-semibold shrink-0 mt-0.5">
-            {userInitial}
-          </div>
-        )}
-
-        {/* Content */}
-        <div className="min-w-0 flex-1 pt-0.5">
-          <p className="text-[13px] font-semibold text-[#ececec] mb-2 select-none">
-            {isAI ? "NeuroStack AI" : "You"}
-          </p>
-
-          {isAI ? (
-            <div className="text-[15px] leading-7 text-[#ececec] select-text">
-              <ReactMarkdown
-                remarkPlugins={[remarkGfm]}
-                components={{
-                  h1: ({ children }) => <h1 className="mb-4 mt-6 text-xl font-bold first:mt-0">{children}</h1>,
-                  h2: ({ children }) => <h2 className="mb-3 mt-5 text-lg font-bold first:mt-0">{children}</h2>,
-                  h3: ({ children }) => <h3 className="mb-2 mt-4 text-base font-semibold first:mt-0">{children}</h3>,
-                  p: ({ children }) => <p className="my-2.5 leading-7 first:mt-0 last:mb-0">{children}</p>,
-                  ul: ({ children }) => <ul className="my-3 list-disc space-y-1 pl-6">{children}</ul>,
-                  ol: ({ children }) => <ol className="my-3 list-decimal space-y-1 pl-6">{children}</ol>,
-                  li: ({ children }) => <li className="leading-7">{children}</li>,
-                  strong: ({ children }) => <strong className="font-semibold">{children}</strong>,
-                  blockquote: ({ children }) => (
-                    <blockquote className="my-4 border-l-2 border-white/20 pl-4 text-[#8e8e8e] italic">
-                      {children}
-                    </blockquote>
-                  ),
-                  table: ({ children }) => (
-                    <div className="my-4 overflow-x-auto rounded-lg border border-white/10">
-                      <table className="w-full border-collapse text-sm">{children}</table>
-                    </div>
-                  ),
-                  th: ({ children }) => (
-                    <th className="border border-white/10 bg-white/5 px-3.5 py-2 text-left font-semibold">
-                      {children}
-                    </th>
-                  ),
-                  td: ({ children }) => (
-                    <td className="border border-white/10 px-3.5 py-2 align-top">{children}</td>
-                  ),
-                  code: ({ className, children }) => {
-                    const match = /language-(\w+)/.exec(className || "")
-                    const codeStr = String(children).replace(/\n$/, "")
-                    const isInline = !match
-
-                    if (isInline) {
-                      return (
-                        <code className="rounded-md bg-white/10 px-1.5 py-0.5 font-mono text-[0.85em] text-[#ececec]">
-                          {children}
-                        </code>
-                      )
-                    }
-                    return <CodeBlock lang={match ? match[1] : "code"} code={codeStr} />
-                  },
-                }}
-              >
-                {msg.content}
-              </ReactMarkdown>
-
-              {/* Streaming caret */}
-              {isStreaming && (
-                <span className="inline-block align-middle ml-0.5 w-[2px] h-[1.1em] bg-[#ececec] animate-pulse" />
-              )}
-
-              {/* RAG Sources — CitationBadge */}
-              {msg.sources && msg.sources.length > 0 && (
-                <div className="mt-5 border-t border-white/10 pt-4">
-                  <p className="mb-3 text-[11px] font-semibold uppercase tracking-wider text-[#8e8e8e]">
-                    Sources
-                  </p>
-                  <div className="flex flex-wrap gap-2">
-                    {msg.sources.map((src: any, sIdx: number) => (
-                      <CitationBadge key={sIdx} source={{ ...src, sourceNumber: src.sourceNumber ?? sIdx + 1 }} />
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
-          ) : (
-            <div className="whitespace-pre-wrap text-[15px] leading-7 text-[#ececec] select-text">
-              {msg.content}
-            </div>
-          )}
-
-          {/* Copy + Feedback actions (visible on hover for assistant messages) */}
-          {!isStreaming && (
-            <div className="flex items-center gap-3 mt-3 opacity-0 group-hover:opacity-100 transition-opacity">
-              <button
-                onClick={handleCopy}
-                className="flex items-center gap-1.5 text-[11px] text-[#8e8e8e] hover:text-[#ececec] transition-colors bg-transparent border-0 outline-none cursor-pointer"
-              >
-                {copied ? (
-                  <>
-                    <Check className="size-3 text-[#19c37d]" />
-                    <span className="text-[#19c37d]">Copied</span>
-                  </>
-                ) : (
-                  <>
-                    <Copy className="size-3" />
-                    <span>Copy</span>
-                  </>
-                )}
-              </button>
-
-              {isAI && msg._id && conversationId && (
-                <FeedbackButtons
-                  messageId={msg._id}
-                  conversationId={conversationId}
-                  initialRating={msg.feedback?.rating}
-                />
-              )}
-            </div>
-          )}
+  // USER MESSAGE: Clean right-aligned speech bubble (No logo, no name header)
+  if (!isAI) {
+    return (
+      <div className="flex justify-end my-3.5 px-2">
+        <div className="bg-[#1f2330] border border-white/10 text-[#ececec] px-5 py-3.5 rounded-3xl rounded-tr-md max-w-[85%] sm:max-w-[75%] shadow-md whitespace-pre-wrap text-[15px] leading-relaxed select-text">
+          {msg.content}
         </div>
       </div>
+    )
+  }
+
+  // AI ASSISTANT MESSAGE: Clean full-width response stream (No logo, no name header)
+  return (
+    <div className="group relative py-3 px-2 my-1">
+      <div className="text-[15px] leading-7 text-[#ececec] select-text">
+        <ReactMarkdown
+          remarkPlugins={[remarkGfm]}
+          components={{
+            h1: ({ children }) => <h1 className="mb-4 mt-6 text-xl font-bold text-white first:mt-0">{children}</h1>,
+            h2: ({ children }) => <h2 className="mb-3 mt-5 text-lg font-bold text-white first:mt-0">{children}</h2>,
+            h3: ({ children }) => <h3 className="mb-2 mt-4 text-base font-semibold text-white first:mt-0">{children}</h3>,
+            p: ({ children }) => <p className="my-2.5 leading-7 first:mt-0 last:mb-0">{children}</p>,
+            ul: ({ children }) => <ul className="my-3 list-disc space-y-1 pl-6">{children}</ul>,
+            ol: ({ children }) => <ol className="my-3 list-decimal space-y-1 pl-6">{children}</ol>,
+            li: ({ children }) => <li className="leading-7">{children}</li>,
+            strong: ({ children }) => <strong className="font-semibold text-white">{children}</strong>,
+            blockquote: ({ children }) => (
+              <blockquote className="my-4 border-l-2 border-emerald-500/50 pl-4 text-gray-400 italic bg-white/[0.02] py-1 rounded-r-lg">
+                {children}
+              </blockquote>
+            ),
+            table: ({ children }) => (
+              <div className="my-4 overflow-x-auto rounded-xl border border-white/10 shadow-lg">
+                <table className="w-full border-collapse text-sm">{children}</table>
+              </div>
+            ),
+            th: ({ children }) => (
+              <th className="border border-white/10 bg-white/10 px-4 py-2.5 text-left font-semibold text-white">
+                {children}
+              </th>
+            ),
+            td: ({ children }) => (
+              <td className="border border-white/10 px-4 py-2.5 align-top">{children}</td>
+            ),
+            code: ({ className, children }) => {
+              const match = /language-(\w+)/.exec(className || "")
+              const codeStr = String(children).replace(/\n$/, "")
+              const isInline = !match
+
+              if (isInline) {
+                return (
+                  <code className="rounded-md bg-white/10 px-1.5 py-0.5 font-mono text-[0.85em] text-emerald-300">
+                    {children}
+                  </code>
+                )
+              }
+              return <CodeBlock lang={match ? match[1] : "code"} code={codeStr} />
+            },
+          }}
+        >
+          {msg.content}
+        </ReactMarkdown>
+
+        {/* Streaming caret */}
+        {isStreaming && (
+          <span className="inline-block align-middle ml-1 w-[3px] h-[1.2em] bg-emerald-400 animate-pulse rounded-full" />
+        )}
+      </div>
+
+      {/* Copy + Feedback actions */}
+      {!isStreaming && (
+        <div className="flex items-center gap-3 mt-3 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
+          <button
+            onClick={handleCopy}
+            className="flex items-center gap-1.5 text-xs text-gray-400 hover:text-white transition-colors bg-white/5 hover:bg-white/10 px-2.5 py-1 rounded-lg border border-white/10 cursor-pointer"
+          >
+            {copied ? (
+              <>
+                <Check className="size-3.5 text-emerald-400" />
+                <span className="text-emerald-400 font-medium">Copied</span>
+              </>
+            ) : (
+              <>
+                <Copy className="size-3.5" />
+                <span>Copy</span>
+              </>
+            )}
+          </button>
+
+          {msg._id && conversationId && (
+            <FeedbackButtons
+              messageId={msg._id}
+              conversationId={conversationId}
+              initialRating={msg.feedback?.rating}
+            />
+          )}
+        </div>
+      )}
     </div>
   )
 }

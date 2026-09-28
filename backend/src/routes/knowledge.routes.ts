@@ -27,6 +27,9 @@ import {
   ingestionQueue,
 } from "../services/ingestion.queue"
 
+import { redis } from "../services/redis.service"
+import { runIngestionPipeline } from "../services/ingestion.orchestrator"
+
 const router = Router()
 
 // ======================================================
@@ -59,6 +62,37 @@ router.get(
   "/",
   protect,
   getKnowledgeSources
+)
+
+// ======================================================
+// GET SPECIFIC KNOWLEDGE DOCUMENT STATUS
+// ======================================================
+
+router.get(
+  "/:knowledgeId",
+  protect,
+  verifyKnowledgeOwnership,
+  async (req: AuthRequest, res) => {
+    try {
+      const knowledge = req.knowledge!
+      res.status(200).json({
+        success: true,
+        knowledge: {
+          id: knowledge._id,
+          originalName: knowledge.originalName,
+          mimeType: knowledge.mimeType,
+          size: knowledge.size,
+          status: knowledge.status,
+          currentStep: knowledge.currentStep,
+          errorMessage: knowledge.errorMessage,
+          chunks: knowledge.chunks,
+          createdAt: knowledge.createdAt,
+        },
+      })
+    } catch (error) {
+      res.status(500).json({ success: false, message: "Failed to get document status" })
+    }
+  }
 )
 
 // ======================================================
@@ -116,15 +150,26 @@ router.post(
       knowledge.lastAttemptAt = new Date()
       await knowledge.save()
 
-      // Add to BullMQ queue
-      await ingestionQueue.add(`ingest-${knowledgeId}`, { knowledgeId, userId })
+      // Enqueue to BullMQ if Redis is running
+      try {
+        if (redis.status === "ready") {
+          await ingestionQueue.add(`ingest-${knowledgeId}`, { knowledgeId, userId })
+        }
+      } catch (queueErr: any) {
+        console.warn("[KNOWLEDGE] Queue enqueue warning:", queueErr?.message || queueErr)
+      }
+
+      // Direct in-process execution fallback so processing NEVER hangs if worker process is inactive
+      runIngestionPipeline(knowledgeId, userId).catch((err) => {
+        console.error(`[KNOWLEDGE] Ingestion pipeline execution error for ${knowledgeId}:`, err)
+      })
 
       res.status(202).json({
         success: true,
-        message: "Document indexing job queued successfully.",
+        message: "Document indexing job started successfully.",
         knowledgeId,
-        status: "uploaded",
-        currentStep: "queued",
+        status: "processing",
+        currentStep: "parsing",
       })
     } catch (error) {
       console.error("Knowledge enqueue error:", error)

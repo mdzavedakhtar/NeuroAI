@@ -88,32 +88,36 @@ export async function runIngestionPipeline(knowledgeId: string, userId: string):
     knowledge.currentStep = "graph_indexing"
     await knowledge.save()
 
-    // Clean up old graph data before re-ingesting to ensure idempotency
     try {
-      await deleteGraphForKnowledge(knowledgeId, userId)
-    } catch (err) {
-      console.warn("[ORCHESTRATOR] Warning: Failed to clean up old Neo4j graph data before re-ingestion:", err)
-    }
-
-    const savedChunks = await KnowledgeChunk.find({
-      knowledgeId: knowledge._id,
-    }).select("_id chunkIndex content pageNumber").lean()
-
-    await ingestChunksToGraph(
-      savedChunks.map((c) => ({
-        chunkId:    c._id.toString(),
-        chunkIndex: c.chunkIndex,
-        content:    c.content,
-        pageNumber: c.pageNumber ?? 1,
-      })),
-      {
-        documentId: knowledge._id.toString(),
-        userId:     userId,
-        fileName:   knowledge.originalName,
-        fileType:   processed.fileType,
-        uploadedAt: knowledge.createdAt?.toISOString() ?? new Date().toISOString(),
+      // Clean up old graph data before re-ingesting to ensure idempotency
+      try {
+        await deleteGraphForKnowledge(knowledgeId, userId)
+      } catch (err) {
+        console.warn("[ORCHESTRATOR] Warning: Failed to clean up old Neo4j graph data before re-ingestion:", err)
       }
-    )
+
+      const savedChunks = await KnowledgeChunk.find({
+        knowledgeId: knowledge._id,
+      }).select("_id chunkIndex content pageNumber").lean()
+
+      await ingestChunksToGraph(
+        savedChunks.map((c) => ({
+          chunkId:    c._id.toString(),
+          chunkIndex: c.chunkIndex,
+          content:    c.content,
+          pageNumber: c.pageNumber ?? 1,
+        })),
+        {
+          documentId: knowledge._id.toString(),
+          userId:     userId,
+          fileName:   knowledge.originalName,
+          fileType:   processed.fileType,
+          uploadedAt: knowledge.createdAt?.toISOString() ?? new Date().toISOString(),
+        }
+      )
+    } catch (graphError: any) {
+      console.warn(`[ORCHESTRATOR] Neo4j graph indexing skipped/failed for ${knowledgeId}:`, graphError?.message || graphError)
+    }
 
     // --------------------------------------------------
     // STEP 5: COMPLETED (status: ready, currentStep: completed)

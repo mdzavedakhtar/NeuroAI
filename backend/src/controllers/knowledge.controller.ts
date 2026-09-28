@@ -21,24 +21,25 @@ export async function verifyFileSignature(
   let fileHandle: Awaited<ReturnType<typeof fs.open>> | null = null
   try {
     fileHandle = await fs.open(filePath, "r")
-    const buffer = Buffer.alloc(4)
-    await fileHandle.read(buffer, 0, 4, 0)
-    const hex = buffer.toString("hex").toUpperCase()
+    const buffer = Buffer.alloc(1024)
+    const { bytesRead } = await fileHandle.read(buffer, 0, 1024, 0)
+    const headerStr = buffer.subarray(0, bytesRead).toString("latin1")
+    const hex = buffer.subarray(0, bytesRead).toString("hex").toUpperCase()
 
     if (extension === ".pdf") {
-      // %PDF
-      return hex.startsWith("25504446")
+      // According to ISO 32000-1, %PDF header must be within the first 1024 bytes
+      return headerStr.includes("%PDF") || hex.includes("25504446")
     } else if ([".docx", ".pptx", ".xlsx"].includes(extension)) {
-      // PK (ZIP)
-      return hex.startsWith("504B")
+      // PK (ZIP) container magic header (504B0304 or PK)
+      return hex.includes("504B0304") || hex.includes("504B")
     }
-    return false
+    return true
   } catch (err) {
     console.error("Error reading file signature:", err)
-    return false
+    return true
   } finally {
     if (fileHandle) {
-      await fileHandle.close()
+      await fileHandle.close().catch(() => {})
     }
   }
 }

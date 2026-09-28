@@ -1,12 +1,11 @@
-import {
-  Request,
-  Response,
-} from "express"
-
+import fs from "fs"
 import mongoose from "mongoose"
 
 import Conversation from "../models/Conversation"
 import Message from "../models/Message"
+import Knowledge from "../models/Knowledge"
+import KnowledgeChunk from "../models/KnowledgeChunk"
+import { processDocument } from "../services/document.service"
 import {
   searchKnowledge,
   buildKnowledgeContext,
@@ -19,6 +18,88 @@ import {
 import { buildMemoryContext } from "../services/memory.service"
 import { trackRequest, trackGeneration, checkLimits } from "../services/usage.service"
 import RequestLog from "../models/RequestLog"
+
+async function retrieveKnowledgeContextHelper(query: string, userId: string, knowledgeId: string) {
+  let results: any[] = []
+  let context = ""
+
+  // Tier 1: Pinecone Vector Search
+  try {
+    results = await searchKnowledge({
+      query,
+      userId,
+      knowledgeId,
+      topK: 8,
+    })
+    context = buildKnowledgeContext(results)
+    if (context.trim()) {
+      console.log(`[RAG] Retrieved ${results.length} chunk(s) via Pinecone vector search.`)
+    }
+  } catch (err) {
+    console.warn("[RAG] Pinecone search error, checking fallback:", err)
+  }
+
+  // Tier 2: MongoDB KnowledgeChunk Fallback
+  if (!context.trim()) {
+    console.log(`[RAG] Checking MongoDB KnowledgeChunk fallback for ${knowledgeId}...`)
+    try {
+      const mongoChunks = await KnowledgeChunk.find({ knowledgeId })
+        .sort({ chunkIndex: 1 })
+        .limit(10)
+        .lean()
+
+      if (mongoChunks.length > 0) {
+        results = mongoChunks.map((c) => ({
+          id: c._id.toString(),
+          score: 1.0,
+          text: c.content,
+          knowledgeId: c.knowledgeId.toString(),
+          userId: c.userId.toString(),
+          chunkIndex: c.chunkIndex,
+          originalName: c.originalName,
+          pageNumber: c.pageNumber || 1,
+          source: "knowledge",
+        }))
+        context = buildKnowledgeContext(results)
+        console.log(`[RAG] Retrieved ${mongoChunks.length} chunk(s) via MongoDB fallback.`)
+      }
+    } catch (dbErr) {
+      console.error("[RAG] MongoDB chunk lookup error:", dbErr)
+    }
+  }
+
+  // Tier 3: Direct On-The-Fly Document File Parser Fallback
+  if (!context.trim()) {
+    console.log(`[RAG] MongoDB chunks empty/pending. Reading document directly from disk on the fly...`)
+    try {
+      const doc = await Knowledge.findById(knowledgeId)
+      if (doc && doc.path && fs.existsSync(doc.path)) {
+        const processed = await processDocument(doc.path, doc.mimeType)
+        if (processed.text) {
+          context = processed.text.slice(0, 15000)
+          results = [
+            {
+              id: doc._id.toString(),
+              score: 1.0,
+              text: context,
+              knowledgeId: doc._id.toString(),
+              userId,
+              chunkIndex: 0,
+              originalName: doc.originalName,
+              pageNumber: 1,
+              source: "knowledge",
+            },
+          ]
+          console.log(`[RAG] Extracted ${context.length} characters directly from document on disk.`)
+        }
+      }
+    } catch (fileErr) {
+      console.error("[RAG] Direct document parsing error:", fileErr)
+    }
+  }
+
+  return { results, context }
+}
 
 const getUserId = (req: Request) => {
   const user = (req as any).user
@@ -91,21 +172,27 @@ export const createConversation = async (
   }
 }
 
-export const getConversations = async (
-  req: Request,
-  res: Response
-) => {
+export const getConversations = async (req: Request, res: Response) => {
   try {
     const userId = getUserId(req)
 
-    const conversations =
-      await Conversation.find({
-        userId,
+    const conversations = await Conversation.find({ userId })
+      .sort({ updatedAt: -1 })
+
+    // Auto-fix titles for any conversations that have "New Chat" or "New Conversation"
+    await Promise.all(
+      conversations.map(async (conv) => {
+        if (!conv.title || conv.title === "New Chat" || conv.title === "New Conversation" || conv.title.trim() === "") {
+          const firstMsg = await Message.findOne({ conversationId: conv._id, role: "user" }).sort({ createdAt: 1 })
+          if (firstMsg && firstMsg.content) {
+            const cleanMsg = firstMsg.content.trim()
+            const formattedTitle = cleanMsg.length > 45 ? `${cleanMsg.slice(0, 42)}...` : cleanMsg
+            conv.title = formattedTitle.charAt(0).toUpperCase() + formattedTitle.slice(1)
+            await conv.save()
+          }
+        }
       })
-        .sort({
-          updatedAt: -1,
-        })
-        .lean()
+    )
 
     return res.status(200).json({
       success: true,
@@ -253,6 +340,55 @@ export const deleteConversation = async (
   }
 }
 
+export const updateConversation = async (
+  req: Request,
+  res: Response
+) => {
+  try {
+    const userId = getUserId(req)
+    const conversationId = req.params.conversationId as string
+    const { title } = req.body
+
+    if (!mongoose.Types.ObjectId.isValid(conversationId)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid conversation ID",
+      })
+    }
+
+    if (typeof title !== "string" || !title.trim()) {
+      return res.status(400).json({
+        success: false,
+        message: "Title is required",
+      })
+    }
+
+    const conversation = await Conversation.findOneAndUpdate(
+      { _id: conversationId, userId },
+      { title: title.trim(), updatedAt: new Date() },
+      { new: true }
+    )
+
+    if (!conversation) {
+      return res.status(404).json({
+        success: false,
+        message: "Conversation not found",
+      })
+    }
+
+    return res.status(200).json({
+      success: true,
+      conversation,
+    })
+  } catch (error) {
+    console.error("Update conversation error:", error)
+    return res.status(500).json({
+      success: false,
+      message: "Failed to update conversation",
+    })
+  }
+}
+
 // ======================================================
 // SEND MESSAGE + RAG ANSWER
 // ======================================================
@@ -380,14 +516,13 @@ if (recentDuplicate) {
     let context = ""
 
     if (conversation.knowledgeId) {
-      results = await searchKnowledge({
-        query: cleanMessage,
+      const retrieved = await retrieveKnowledgeContextHelper(
+        cleanMessage,
         userId,
-        knowledgeId: conversation.knowledgeId.toString(),
-        topK: 8,
-      })
-      context = buildKnowledgeContext(results)
-      console.log(`[RAG] Retrieved ${results.length} chunk(s) for context assembly.`)
+        conversation.knowledgeId.toString()
+      )
+      results = retrieved.results
+      context = retrieved.context
     }
 
     // --------------------------------------------------
@@ -459,16 +594,15 @@ if (recentDuplicate) {
     // --------------------------------------------------
 
     if (
-      conversation.title ===
-      "New Conversation"
+      !conversation.title ||
+      conversation.title === "New Conversation" ||
+      conversation.title === "New Chat" ||
+      conversation.title.trim() === ""
     ) {
-      conversation.title =
-        cleanMessage.length > 60
-          ? `${cleanMessage.slice(
-              0,
-              57
-            )}...`
-          : cleanMessage
+      const formattedTitle = cleanMessage.length > 45
+        ? `${cleanMessage.slice(0, 42)}...`
+        : cleanMessage
+      conversation.title = formattedTitle.charAt(0).toUpperCase() + formattedTitle.slice(1)
     }
 
     // Force updatedAt refresh
@@ -609,14 +743,13 @@ export const sendChatMessageStream = async (
     let context = ""
 
     if (conversation.knowledgeId) {
-      results = await searchKnowledge({
-        query: cleanMessage,
+      const retrieved = await retrieveKnowledgeContextHelper(
+        cleanMessage,
         userId,
-        knowledgeId: conversation.knowledgeId.toString(),
-        topK: 8,
-      })
-      context = buildKnowledgeContext(results)
-      console.log(`[RAG] Retrieved ${results.length} chunk(s) for context assembly.`)
+        conversation.knowledgeId.toString()
+      )
+      results = retrieved.results
+      context = retrieved.context
     }
 
     const sources = results.map((result, index) => ({
@@ -674,9 +807,22 @@ export const sendChatMessageStream = async (
           res.write(`data: ${JSON.stringify({ type: "content", text: chunkText })}\n\n`)
         }
         console.log(`[LLM] Stream generation complete. Answer length: ${answer.length} chars.`)
-      } catch (streamError) {
-        console.error("[LLM] Gemini stream error:", streamError)
-        res.write(`data: ${JSON.stringify({ type: "error", message: "Stream generation error" })}\n\n`)
+      } catch (streamError: any) {
+        console.error("[LLM] Gemini stream error, attempting non-streaming fallback:", streamError?.message || streamError)
+        if (!answer.trim()) {
+          try {
+            answer = await generateRagAnswer({
+              question: cleanMessage,
+              context,
+              conversationHistory,
+              model,
+            })
+            res.write(`data: ${JSON.stringify({ type: "content", text: answer })}\n\n`)
+          } catch (nonStreamErr: any) {
+            console.error("[LLM] Non-streaming fallback also failed:", nonStreamErr?.message || nonStreamErr)
+            res.write(`data: ${JSON.stringify({ type: "error", message: "Stream generation error" })}\n\n`)
+          }
+        }
       }
     } else if (answer) {
       res.write(`data: ${JSON.stringify({ type: "content", text: answer })}\n\n`)
@@ -692,10 +838,16 @@ export const sendChatMessageStream = async (
     })
 
     // Auto title update
-    if (conversation.title === "New Conversation") {
-      conversation.title = cleanMessage.length > 60
-        ? `${cleanMessage.slice(0, 57)}...`
+    if (
+      !conversation.title ||
+      conversation.title === "New Conversation" ||
+      conversation.title === "New Chat" ||
+      conversation.title.trim() === ""
+    ) {
+      const formattedTitle = cleanMessage.length > 45
+        ? `${cleanMessage.slice(0, 42)}...`
         : cleanMessage
+      conversation.title = formattedTitle.charAt(0).toUpperCase() + formattedTitle.slice(1)
     }
 
     conversation.updatedAt = new Date()

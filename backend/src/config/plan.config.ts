@@ -10,11 +10,11 @@ export interface IPlan {
 export const PLANS: Record<string, IPlan> = {
   free: {
     name: "Free",
-    requestsLimit: 100, // 100 requests per usage period for testing limit triggers easily
-    aiGenerationsLimit: 10,
-    tokensLimit: 20000,
-    documentsLimit: 3,
-    storageLimit: 5 * 1024 * 1024, // 5 MB
+    requestsLimit: 2000,
+    aiGenerationsLimit: 500,
+    tokensLimit: 1000000,
+    documentsLimit: 25,
+    storageLimit: 100 * 1024 * 1024, // 100 MB
   },
   developer: {
     name: "Developer",

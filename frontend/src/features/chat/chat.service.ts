@@ -1,4 +1,4 @@
-﻿import { apiFetch } from "@/services/api"
+import { apiFetch } from "@/services/api"
 
 import type {
   ConversationResponse,
@@ -64,6 +64,21 @@ export async function deleteConversation(
     `/chat/conversations/${conversationId}`,
     {
       method: "DELETE",
+    }
+  )
+}
+
+export async function updateConversation(
+  conversationId: string,
+  title: string
+) {
+  return apiFetch<ConversationResponse>(
+    `/chat/conversations/${conversationId}`,
+    {
+      method: "PUT",
+      body: JSON.stringify({
+        title,
+      }),
     }
   )
 }

@@ -52,44 +52,44 @@
    ========================================================= */
 
 :root {
-  /* ChatGPT exact palette */
-  --background: #212121;
+  /* Rich obsidian & emerald dark palette */
+  --background: #090a10;
   --foreground: #ececec;
 
-  --card: #2f2f2f;
+  --card: #12151f;
   --card-foreground: #ececec;
 
-  --popover: #1e1e1e;
+  --popover: #151822;
   --popover-foreground: #ececec;
 
-  --primary: #ececec;
-  --primary-foreground: #212121;
+  --primary: #10b981;
+  --primary-foreground: #000000;
 
-  --secondary: #2f2f2f;
+  --secondary: #191c28;
   --secondary-foreground: #ececec;
 
-  --muted: #2f2f2f;
-  --muted-foreground: #8e8e8e;
+  --muted: #191c28;
+  --muted-foreground: #9ca3af;
 
-  --accent: #3f3f3f;
+  --accent: #222634;
   --accent-foreground: #ececec;
 
   --destructive: #ef4444;
 
-  --border: rgba(255, 255, 255, 0.1);
-  --input: rgba(255, 255, 255, 0.08);
-  --ring: rgba(255, 255, 255, 0.2);
+  --border: rgba(255, 255, 255, 0.08);
+  --input: rgba(255, 255, 255, 0.06);
+  --ring: rgba(16, 185, 129, 0.3);
 
   --radius: 0.75rem;
 
-  --sidebar: #171717;
+  --sidebar: #0e1017;
   --sidebar-foreground: #ececec;
-  --sidebar-primary: #ececec;
-  --sidebar-primary-foreground: #171717;
-  --sidebar-accent: #2f2f2f;
+  --sidebar-primary: #10b981;
+  --sidebar-primary-foreground: #000000;
+  --sidebar-accent: #181b24;
   --sidebar-accent-foreground: #ececec;
   --sidebar-border: rgba(255, 255, 255, 0.08);
-  --sidebar-ring: rgba(255, 255, 255, 0.15);
+  --sidebar-ring: rgba(16, 185, 129, 0.2);
 }
 
 /* =========================================================
@@ -110,7 +110,7 @@
   }
 
   body {
-    background-color: #212121;
+    background-color: #090a10;
     color: #ececec;
     min-height: 100vh;
     font-family: var(--font-inter), "Inter", system-ui, -apple-system, sans-serif;

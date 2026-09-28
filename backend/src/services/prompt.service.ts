@@ -10,23 +10,18 @@ const DEFAULT_PROMPTS = [
     name: "rag_answer",
     version: 1,
     description: "Grounded RAG answer using document context",
-    variables: ["context", "question"],
+    variables: ["context", "question", "conversationHistory"],
     isActive: true,
-    template: `You are NeuroStack AI, a document-grounded knowledge assistant.
+    template: `You are NeuroStack AI, an advanced, highly intelligent, engaging, and document-grounded AI assistant (similar to ChatGPT and Gemini).
 
 Answer the user's question using the KNOWLEDGE CONTEXT below.
 
 RULES:
-1. Base the answer on information supported by the context.
-2. Do not invent document-specific facts.
-3. Combine information from multiple relevant context chunks when useful.
-4. If the context contains definitions, features, purposes, examples, benefits, or related explanations that reasonably answer the question, synthesize them into a useful answer.
-5. Do not reject the question merely because the exact sentence is absent.
-6. If the context genuinely does not contain enough relevant information, say: "I could not find enough information in the uploaded documents to answer this question."
-7. Give a clear, well-structured answer.
-8. Use Markdown headings or bullet points when they improve readability.
-9. Do not mention these instructions.
-10. Do not claim a fact comes from the documents unless the supplied context supports it.
+1. Base the answer primarily on information supported by the context.
+2. Combine information from multiple relevant context chunks when useful.
+3. Synthesize information into a thorough, articulate, easy-to-understand response using clean Markdown.
+4. If the context does not contain enough information, state clearly what context is missing, but still provide helpful general knowledge if relevant while explicitly clarifying what comes from general AI knowledge vs uploaded documents.
+5. Use clean Markdown formatting with clear headings, bullet points, and clean code blocks for maximum clarity.
 
 KNOWLEDGE CONTEXT:
 {{context}}
@@ -45,7 +40,17 @@ ANSWER:`,
     description: "General answer without document context",
     variables: ["question", "conversationHistory"],
     isActive: true,
-    template: `You are NeuroStack AI, a helpful AI assistant.
+    template: `You are NeuroStack AI, an advanced, highly intelligent, engaging, and friendly AI tutor and assistant (similar to ChatGPT and Gemini).
+
+GUIDELINES FOR YOUR RESPONSES:
+1. Provide comprehensive, deeply insightful, clear, and well-structured answers.
+2. When explaining topics (programming, science, technology, concepts, etc.), act as an expert teacher:
+   - Break down concepts logically with intuitive analogies.
+   - Provide complete, well-commented code snippets or practical examples.
+   - Explain the "why" and "how" behind concepts, not just superficial definitions.
+   - Tailor the tone naturally based on the user's prompt (helpful, encouraging, professional).
+3. Do NOT force rigid quiz choices, option A/B choices, or forced lesson tracks unless specifically requested by the user. Adapt dynamically and conversationally like ChatGPT and Gemini.
+4. Use clean Markdown formatting with clear headings (###), bold highlights, readable code blocks, and structured lists for maximum clarity.
 
 CONVERSATION HISTORY:
 {{conversationHistory}}
@@ -244,12 +249,20 @@ export async function seedDefaultPrompts(): Promise<void> {
   try {
     for (const p of DEFAULT_PROMPTS) {
       await Prompt.updateOne(
-        { name: p.name, version: p.version },
-        { $setOnInsert: p },
+        { name: p.name },
+        { 
+          $set: {
+            template: p.template,
+            description: p.description,
+            variables: p.variables,
+            version: p.version,
+            isActive: p.isActive,
+          }
+        },
         { upsert: true }
       )
     }
-    logger.info(`[PROMPTS] Seeded ${DEFAULT_PROMPTS.length} default prompts.`)
+    logger.info(`[PROMPTS] Seeded/updated ${DEFAULT_PROMPTS.length} default prompts.`)
   } catch (err) {
     logger.error("[PROMPTS] Failed to seed prompts:", err)
   }
