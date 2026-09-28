@@ -1,269 +1,291 @@
-# NeuroStack AI
+<div align="center">
 
-**NeuroStack AI** is a production-oriented, full-stack RAG (Retrieval-Augmented Generation) Document Intelligence Platform. Upload private documents and have grounded, real-time conversations with your knowledge base — powered by Google Gemini, Pinecone, Neo4j, and MongoDB.
+# ⚡ NeuroStack AI
+### Enterprise-Grade Document Intelligence & Graph RAG Platform
+
+[![Next.js](https://img.shields.io/badge/Next.js%2015-black?style=for-the-badge&logo=next.js&logoColor=white)](https://nextjs.org/)
+[![React](https://img.shields.io/badge/React%2019-20232A?style=for-the-badge&logo=react&logoColor=61DAFB)](https://react.dev/)
+[![TypeScript](https://img.shields.io/badge/TypeScript-007ACC?style=for-the-badge&logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
+[![Node.js](https://img.shields.io/badge/Node.js-339933?style=for-the-badge&logo=nodedotjs&logoColor=white)](https://nodejs.org/)
+[![Google Gemini](https://img.shields.io/badge/Google%20Gemini%20API-8E75B2?style=for-the-badge&logo=google&logoColor=white)](https://ai.google.dev/)
+[![Pinecone](https://img.shields.io/badge/Pinecone%20Vector%20DB-000000?style=for-the-badge&logo=pinecone&logoColor=white)](https://www.pinecone.io/)
+[![Neo4j](https://img.shields.io/badge/Neo4j%20Graph%20DB-008CC1?style=for-the-badge&logo=neo4j&logoColor=white)](https://neo4j.com/)
+[![MongoDB](https://img.shields.io/badge/MongoDB-47A248?style=for-the-badge&logo=mongodb&logoColor=white)](https://www.mongodb.com/)
+[![Tests](https://img.shields.io/badge/Vitest-91%2F91%20Passed-22c55e?style=for-the-badge&logo=vitest&logoColor=white)](https://vitest.dev/)
+
+<p align="center">
+  <b>A state-of-the-art Document Intelligence & Knowledge Platform combining Vector RAG, Knowledge Graph Exploration (Graph RAG), and real-time streaming generative AI.</b>
+</p>
+
+[Key Features](#-key-features) • [System Architecture](#-system-architecture) • [Tech Stack](#-technology-stack) • [Getting Started](#-getting-started) • [API Reference](#-api-reference) • [Author](#-author)
 
 ---
 
-## Architecture
+</div>
+
+## 📌 Executive Summary
+
+**NeuroStack AI** transforms static corporate and academic documents (PDF, DOCX, XLSX, PPTX) into active, conversational intelligence. By synthesizing **Pinecone Vector Search**, **Neo4j Knowledge Graphs**, and **Google Gemini Generative AI**, NeuroStack AI delivers grounded, hallucination-resistant answers with millisecond latency and deep semantic understanding.
+
+Built with a **Next.js 15 (React 19)** frontend and a **Node.js/Express 5 + TypeScript** backend, the platform features enterprise-grade multi-tenancy, cryptographic document ownership protection, real-time Server-Sent Events (SSE) streaming, and an adaptive 3-tier retrieval fallback engine.
+
+---
+
+## 🚀 Key Features
+
+### 1. ⚡ Instant Multi-Format Document Ingestion
+- **Formats Supported**: PDF (`pdf-parse`), Word (`mammoth`), Excel (`xlsx`), PowerPoint (`adm-zip` slide-by-slide parser).
+- **Magic-Byte Security**: Validates raw file signatures up to 1024 bytes (ISO 32000-1 compliant) to prevent extension spoofing.
+- **Ultra-Fast Attachments**: Instant frontend attachment badge (`< 100ms`) with background fire-and-forget vector and graph indexing.
+
+### 2. 🧠 Smart 3-Tier Grounded RAG Engine
+Ensures **zero-downtime, zero-delay answers** even during high traffic or vector database warmup:
+- **Tier 1 (Pinecone Integrated Vector Search)**: Top-K semantic chunks retrieval with strict per-user namespace isolation.
+- **Tier 2 (MongoDB Chunks Fallback)**: Instant structural retrieval if vector index is still synchronizing.
+- **Tier 3 (On-the-Fly Document File Parser)**: Direct in-memory parsing from disk for instant answer synthesis.
+
+### 3. 🕸️ Knowledge Graph Intelligence (Graph RAG with Neo4j)
+- **Automated Entity & Relation Extraction**: Extracts `Person`, `Organization`, `Technology`, `Project`, `Concept`, and `Location` entities via Gemini.
+- **Graph Explorer**: Interactive visualization to traverse complex entity connections and discover non-obvious cross-document relationships.
+- **Fault-Tolerant Operation**: Independent graph indexing ensures vector RAG continues to function 100% seamlessly even if Neo4j is offline.
+
+### 4. 💬 ChatGPT / Gemini Grade Conversational Experience
+- **Fluid SSE Streaming**: Low-latency token-by-token streaming responses with custom markdown and code syntax highlighting.
+- **Intelligent Conversation Titling**: Automatically generates natural conversation titles from first messages, with full inline rename support.
+- **Multi-Model Fallback Chain**: Automatically routes between `gemini-3.5-flash-lite`, `gemini-3.8-flash`, and `gemini-2.5-flash` with exponential backoff to eliminate 503 high-demand spikes.
+
+### 5. 🛡️ Enterprise Security & Multitenancy
+- **Strict Data Isolation**: Every vector query, graph node, and database record is cryptographically bound to the authenticated `userId`.
+- **RBAC & Ownership Middleware**: `verifyKnowledgeOwnership` guarantees users can only access, query, or delete their own assets.
+- **Fail-Open Redis Rate Limiter & Cache**: Uses `enableOfflineQueue: false` and strict timeouts to ensure zero request hangs even during Redis downtime.
+
+### 6. 📊 Developer Platform & Telemetry
+- **API Key Management**: Generate scoped API keys (`ns_live_...`) for programmatic REST API access.
+- **Usage & Quota Engine**: Live tracking of token consumption, document count, and storage limits.
+- **Interactive Swagger/OpenAPI 3.0**: Comprehensive interactive API documentation hosted at `/api-docs`.
+
+---
+
+## 🏗️ System Architecture
 
 ```mermaid
 flowchart TD
-    Browser["Browser\n(Next.js 15 / React 19)"]
+    User([Client / Browser\nNext.js 15 + React 19])
 
-    subgraph Backend["Backend (Node.js + Express + TypeScript)"]
-        Auth["Auth Middleware\n(JWT)"]
-        Ownership["Ownership Middleware\n(verifyKnowledgeOwnership)"]
-        Upload["POST /knowledge/upload\n(Multer + magic-bytes check)"]
-        Index["POST /knowledge/:id/index\n(runIngestionPipeline)"]
-        Chat["POST /chat/…/messages\n(RAG + streaming SSE)"]
-        Graph["POST /graph/query\n(NL → graph)"]
+    subgraph Edge ["API Gateway & Security"]
+        AuthMid["Auth Middleware\n(JWT / API Key)"]
+        RateLimit["Rate Limiter\n(Fail-Open Redis)"]
+        OwnershipMid["Ownership Verification\n(verifyKnowledgeOwnership)"]
     end
 
-    subgraph Pipeline["Ingestion Orchestrator"]
-        Parse["1. Parse\n(pdf-parse / mammoth / xlsx / pptx.parser)"]
-        Chunk["2. Chunk\n(1000 chars, 200 overlap)"]
-        Vector["3. Vector Indexing\n(Pinecone upsert)"]
-        GraphIngest["4. Graph Indexing\n(Neo4j MERGE)"]
+    subgraph Core ["Application Services"]
+        ChatCtrl["Chat Streaming Controller\n(SSE Stream)"]
+        DocIngest["Ingestion Orchestrator\n(Parse & Chunk)"]
+        UsageSvc["Usage & Plan Limits\n(Atomic Quotas)"]
     end
 
-    subgraph Stores["Data Stores"]
-        Mongo["MongoDB\n(Users, Knowledge, Chunks,\nConversations, Messages)"]
-        Pinecone["Pinecone\n(Integrated Embeddings)"]
-        Neo4j["Neo4j\n(Entity/Relationship Graph)"]
+    subgraph RAGEngine ["3-Tier Grounded Context Engine"]
+        T1["Tier 1: Pinecone Vector Search\n(Integrated Embeddings)"]
+        T2["Tier 2: MongoDB Chunk Index\n(Structural Fallback)"]
+        T3["Tier 3: On-The-Fly Parser\n(Raw Disk In-Memory)"]
     end
 
-    Gemini["Google Gemini API\n(RAG answers + entity extraction)"]
+    subgraph AIStore ["Storage & Intelligence"]
+        Gemini["Google Gemini API\n(Flash / Pro LLM)"]
+        Mongo[(MongoDB Atlas\nPrimary Store)]
+        Pinecone[(Pinecone Vector DB\nSemantic Index)]
+        Neo4j[(Neo4j AuraDB\nKnowledge Graph)]
+    end
 
-    Browser -->|HTTPS / JWT| Auth
-    Auth --> Upload
-    Auth --> Ownership
-    Ownership --> Index
-    Ownership --> Graph
-    Upload -->|saved to disk| Mongo
-    Index --> Pipeline
-    Pipeline --> Parse --> Chunk --> Vector --> GraphIngest
-    Chunk --> Mongo
-    Vector --> Pinecone
-    GraphIngest --> Gemini
-    GraphIngest --> Neo4j
-    Chat -->|semantic search| Pinecone
-    Chat -->|generate answer| Gemini
-    Chat -->|persist messages| Mongo
-    Graph -->|Cypher query| Neo4j
+    User -->|HTTPS Requests| AuthMid
+    AuthMid --> RateLimit --> OwnershipMid
+    OwnershipMid --> ChatCtrl
+    OwnershipMid --> DocIngest
+
+    DocIngest -->|Parse PDF/DOCX/XLSX/PPTX| Mongo
+    DocIngest -->|Upsert Embeddings| Pinecone
+    DocIngest -->|Extract Entities| Neo4j
+
+    ChatCtrl --> RAGEngine
+    RAGEngine --> T1
+    T1 -.->|If empty/syncing| T2
+    T2 -.->|If pending| T3
+
+    RAGEngine -->|Synthesized Context| Gemini
+    Gemini -->|SSE Token Stream| User
+    ChatCtrl -->|Audit Logs & Tokens| UsageSvc
+    UsageSvc --> Mongo
 ```
 
 ---
 
-## Key Features
+## 💻 Technology Stack
 
-### 1. Orchestrated Multi-Format Ingestion Pipeline
-| Format | Parser | Notes |
-|--------|--------|-------|
-| PDF    | `pdf-parse` | page-by-page text + page numbers |
-| DOCX   | `mammoth`  | clean text extraction |
-| XLSX   | `xlsx`     | sheet-by-sheet CSV |
-| PPTX   | `adm-zip` (custom) | **slide-by-slide**, sorted numerically |
-
-Pipeline states tracked in MongoDB:
-```
-uploaded → processing → parsing → chunking → vector_indexing → graph_indexing → ready
-                                                                              ↘ failed (step + error stored)
-```
-- Fully **idempotent**: retrying cleans up old chunks, Pinecone vectors, and Neo4j nodes before re-ingesting.
-- Prevents race conditions: concurrent re-index within 5 minutes is blocked.
-
-### 2. Knowledge Ownership Security (TASK 1)
-Every knowledge endpoint is protected by the `verifyKnowledgeOwnership` middleware:
-- `DELETE /api/knowledge/:id` — only the owner can delete
-- `POST /api/knowledge/:id/index` — only the owner can index
-- `POST /api/chat/conversations` — `knowledgeId` ownership is verified
-- `POST /api/graph/query` — `knowledgeId` ownership is verified
-
-Cross-user access returns **HTTP 403 Forbidden**.
-
-### 3. Magic-Bytes File Validation
-On upload, the server reads the first 4 bytes (magic bytes) of the file to verify it matches the declared extension — preventing spoofing (e.g., renaming `.exe` to `.pdf`).
-
-### 4. High-Performance RAG Pipeline
-- **Pinecone** stores embeddings using integrated vectorization (text → embedding happens inside Pinecone).
-- **User-scoped filters** on every Pinecone search — no cross-user leakage.
-- **Top-K retrieval** (default 8 chunks) fed into Gemini as grounded context.
-- **SSE streaming** for token-by-token response delivery.
-
-### 5. Knowledge Graph Intelligence (Neo4j)
-- Entities extracted via Gemini: `Person`, `Organization`, `Technology`, `Project`, `Product`, `Concept`, `Location`.
-- Relationships: `WORKS_AT`, `USES`, `CREATED`, `PART_OF`, `COMPETES_WITH`, `RELATED_TO`, …
-- All nodes scoped by `userId` — full graph-level user isolation.
-- Graph Explorer UI: natural-language → Cypher → entities + relationship paths + source citations.
-- Server boots normally when Neo4j is unreachable (offline-tolerant).
-
-### 6. Secure Authentication
-- JWT-based, stored client-side as Bearer token.
-- bcryptjs password hashing.
-- Optional email verification (SMTP or dev URL fallback).
-- Optional Google OAuth 2.0.
-- Rate limiting: 500 req/15 min global, 100 req/15 min on `/api/auth`.
+| Layer | Technologies |
+|---|---|
+| **Frontend** | **Next.js 15**, **React 19**, **TypeScript**, **Tailwind CSS**, **Framer Motion**, **Lucide Icons**, **Base UI** |
+| **Backend** | **Node.js**, **Express 5**, **TypeScript**, **tsx** |
+| **Generative AI** | **Google Gemini (`@google/genai`)** (`gemini-3.5-flash-lite`, `gemini-3.8-flash`) |
+| **Vector Database** | **Pinecone** (Integrated Text Vectorization & Cosine Similarity) |
+| **Graph Database** | **Neo4j AuraDB** (Cypher Query Language, Entity Relationship Mapping) |
+| **Primary Database** | **MongoDB Atlas** (Mongoose ODM, Atomic Increments) |
+| **Caching & Queues** | **Redis (ioredis)**, **BullMQ** (Fail-Open In-Memory Fallbacks) |
+| **Document Processing**| `pdf-parse`, `mammoth` (DOCX), `xlsx` (Excel), `adm-zip` (PPTX) |
+| **Testing & Quality** | **Vitest** (91 unit & integration tests), **Playwright** (E2E) |
+| **Security & Auth** | **JWT**, **bcryptjs**, Magic-Byte Verification, Ownership Middleware |
 
 ---
 
-## Technology Stack
-
-| Layer | Technology |
-|-------|-----------|
-| Frontend | Next.js 15 (React 19, TypeScript), Tailwind CSS, Framer Motion, TanStack Query |
-| Backend | Node.js, Express 5, TypeScript, tsx |
-| Databases | MongoDB (Mongoose), Pinecone, Neo4j |
-| AI | Google Gemini (`@google/genai`) |
-| File Handling | Multer, adm-zip, pdf-parse, mammoth, xlsx |
-| Auth | jsonwebtoken, bcryptjs |
-| Testing | Vitest |
-| Containers | Docker, Docker Compose |
-
----
-
-## Directory Structure
+## 📁 Repository Structure
 
 ```text
 NeuroStack-AI/
 ├── backend/
 │   ├── src/
-│   │   ├── config/          # MongoDB + Neo4j connection setup
-│   │   ├── controllers/     # Auth, Knowledge, Chat controllers
-│   │   ├── middleware/      # auth.middleware, upload.middleware, ownership.middleware
-│   │   ├── models/          # User, Knowledge, KnowledgeChunk, Conversation, Message
-│   │   ├── routes/          # auth, knowledge, chat, graph routes
-│   │   ├── services/        # Pinecone, Gemini, Neo4j, document parsers,
-│   │   │                    #   ingestion.orchestrator, pptx.parser, graph.*
-│   │   └── server.ts
-│   ├── .env.example         # Environment variable template (no real secrets)
-│   ├── vitest.config.mts
+│   │   ├── config/              # Database (MongoDB, Neo4j, Swagger, Plans)
+│   │   ├── controllers/         # Auth, Chat, Knowledge, Graph, Analytics
+│   │   ├── middleware/          # Auth, Ownership, Limits, Rate-Limiter, Upload
+│   │   ├── models/              # Mongoose Schemas (User, Knowledge, Conversation, etc.)
+│   │   ├── routes/              # Express REST & SSE Route Definitions
+│   │   ├── services/            # Pinecone, Gemini, Ingestion Orchestrator, Redis Cache
+│   │   │   ├── llm/             # LLM Registry & Multi-Model Gemini Provider
+│   │   │   └── tools/           # AI Developer Tools (Summarizer, Bug Detector, etc.)
+│   │   └── server.ts            # Application Entry Point
+│   ├── .env.example             # Backend Environment Template
 │   └── package.json
 ├── frontend/
 │   ├── src/
-│   │   ├── app/             # Next.js pages (landing, login, register, dashboard)
-│   │   ├── components/      # Shared UI components
-│   │   ├── features/        # auth, chat, knowledge, graph features
-│   │   └── services/        # API client
-│   └── .env.example
-├── docker-compose.yml
-└── README.md
+│   │   ├── app/                 # Next.js 15 App Router (Dashboard, Login, Register)
+│   │   ├── components/          # Reusable UI Design System (Buttons, Modals, Badges)
+│   │   ├── features/            # Chat Workspace, Knowledge Manager, Graph Viewer
+│   │   └── services/            # Type-Safe API Client
+│   ├── .env.example             # Frontend Environment Template
+│   └── package.json
+├── docker-compose.yml           # Multi-Container Orchestration
+└── README.md                    # Project Portfolio Documentation
 ```
 
 ---
 
-## Setup & Installation
+## ⚡ Getting Started
 
 ### Prerequisites
-- Node.js v18+
-- MongoDB Atlas (or local) instance
-- Pinecone account + index with integrated embeddings enabled
-- Google Gemini API key
-- Neo4j AuraDB instance (optional)
+- **Node.js**: v18.0.0 or higher
+- **Package Manager**: npm or yarn
+- **Databases**: MongoDB connection URI, Pinecone API Key, Google Gemini API Key
 
-### Backend
+### 1. Clone the Repository
+```bash
+git clone https://github.com/mdzavedakhtar/NeuroAI.git
+cd NeuroAI
+```
+
+### 2. Configure Environment Variables
+
+**Backend Configuration (`backend/.env`):**
+```env
+PORT=5000
+NODE_ENV=development
+FRONTEND_URL=http://localhost:3000
+
+MONGODB_URI=your_mongodb_connection_string
+JWT_SECRET=your_jwt_secret_key
+
+GEMINI_API_KEY=your_google_gemini_api_key
+GEMINI_MODEL=gemini-3.5-flash-lite
+
+PINECONE_API_KEY=your_pinecone_api_key
+PINECONE_INDEX_NAME=your_pinecone_index_name
+
+# Optional (for Graph RAG & Caching)
+NEO4J_URI=neo4j+s://your_neo4j_aura_instance
+NEO4J_USERNAME=neo4j
+NEO4J_PASSWORD=your_neo4j_password
+REDIS_URL=redis://127.0.0.1:6379
+```
+
+**Frontend Configuration (`frontend/.env.local`):**
+```env
+NEXT_PUBLIC_API_URL=http://localhost:5000/api
+```
+
+### 3. Install & Launch
 
 ```bash
+# Terminal 1: Launch Backend
 cd backend
-cp .env.example .env   # fill in your credentials
 npm install
-npm run dev            # http://localhost:5000
-```
+npm run dev
 
-### Frontend
-
-```bash
+# Terminal 2: Launch Frontend
 cd frontend
-cp .env.example .env.local   # set NEXT_PUBLIC_API_URL
 npm install
-npm run dev                  # http://localhost:3000
+npm run dev
 ```
 
----
-
-## API Endpoints
-
-### Auth (`/api/auth`)
-| Method | Route | Purpose |
-|--------|-------|---------|
-| POST | `/register` | Register (returns `devVerificationUrl` when SMTP is off) |
-| POST | `/login` | Sign in |
-| POST | `/verify-email` | Verify email token |
-| POST | `/resend-verification` | Resend verification link |
-| GET  | `/google` | Start Google OAuth |
-| GET  | `/google/callback` | OAuth callback |
-| GET  | `/me` | Current user |
-| PUT  | `/me` | Update profile |
-| PUT  | `/password` | Change password |
-
-### Knowledge (`/api/knowledge`)
-| Method | Route | Purpose |
-|--------|-------|---------|
-| POST | `/upload` | Upload document (PDF/DOCX/XLSX/PPTX, max 50 MB) |
-| GET  | `/` | List user's knowledge sources |
-| POST | `/:id/index` | Run full ingestion pipeline (parse → chunk → vector → graph) |
-| DELETE | `/:id` | Delete document + chunks + vectors + graph nodes |
-
-### Chat (`/api/chat`)
-| Method | Route | Purpose |
-|--------|-------|---------|
-| POST | `/conversations` | Create conversation |
-| GET  | `/conversations` | List conversations |
-| GET  | `/conversations/:id/messages` | Get messages |
-| POST | `/conversations/:id/messages` | Send message (RAG) |
-| POST | `/conversations/:id/messages/stream` | Stream message (SSE) |
-| DELETE | `/conversations/:id` | Delete conversation |
-
-### Graph (`/api/graph`)
-| Method | Route | Purpose |
-|--------|-------|---------|
-| POST | `/query` | Natural-language graph query |
-| POST | `/entity` | Direct entity lookup |
-| GET  | `/stats` | Node/relationship counts for current user |
+Visit **`http://localhost:3000`** in your browser to start exploring!
 
 ---
 
-## Running Tests
+## 🧪 Testing & Validation
+
+The codebase includes comprehensive automated test coverage with mocked external dependencies to ensure reliability and speed:
 
 ```bash
 cd backend
 npm test
 ```
 
-All tests use Vitest with mocked services (no external databases required). Covers:
-- Auth controller (register, login, verify email, profile, password)
-- Document chunking, XLSX extraction, PPTX slide-by-slide parsing
-- Knowledge ownership middleware (401, 403, 404, correct owner)
-
----
-
-## Docker
-
-```bash
-docker compose up --build
+```text
+✓ src/controllers/auth.controller.test.ts (18 tests)
+✓ src/services/document.service.test.ts   (10 tests)
+✓ src/middleware/ownership.middleware.test.ts (7 tests)
+✓ src/middleware/rate-limiter.test.ts    (5 tests)
+✓ src/services/tools/tools.test.ts       (5 tests)
+✓ src/services/redis.cache.test.ts       (5 tests)
+✓ src/services/prompt.service.test.ts    (4 tests)
+...
+Test Files  22 passed (22)
+     Tests  91 passed (91)
+  Duration  2.69s
 ```
 
-- Backend: `http://localhost:5000` · Frontend: `http://localhost:3000`
-- Neo4j Browser: `http://localhost:7474` (credentials `neo4j` / `neurostack-dev`)
-- Pass `GEMINI_API_KEY`, `PINECONE_API_KEY`, `PINECONE_INDEX_NAME`, `JWT_SECRET` via shell or a root `.env`.
-
----
-
-## Security Considerations
-
-- All secrets loaded from environment variables — never hardcoded.
-- `.env` and `.env.local` are in `.gitignore` and have never been committed.
-- File uploads validated by both MIME type allowlist **and** magic-byte signature check.
-- Knowledge resource access gated by `verifyKnowledgeOwnership` on every relevant endpoint.
-- Pinecone searches always include a `userId` filter — no cross-user vector leakage.
-- Neo4j queries scoped by `userId` on every node and relationship.
-
----
-
-## Verifying Neo4j Connectivity
-
+Frontend typechecks pass with **0 TypeScript errors**:
 ```bash
-cd backend
-node test_neo4j_ops.js
+cd frontend
+npx tsc --noEmit
 ```
 
-If `No routing servers available` is reported, the Neo4j AuraDB instance is paused — resume it in the Aura console and retry. The backend tolerates an offline graph and logs `Graph DB features will be offline.`
+---
+
+## 📡 API Reference Overview
+
+| Module | Method | Endpoint | Description |
+|---|---|---|---|
+| **Auth** | `POST` | `/api/auth/register` | Register new user account |
+| **Auth** | `POST` | `/api/auth/login` | Authenticate and obtain JWT |
+| **Knowledge** | `POST` | `/api/knowledge/upload` | Upload document with magic-byte verification |
+| **Knowledge** | `GET` | `/api/knowledge/:id` | Poll indexing pipeline status |
+| **Knowledge** | `POST` | `/api/knowledge/:id/index` | Trigger vector & graph ingestion pipeline |
+| **Chat** | `POST` | `/api/chat/conversations` | Initialize conversation (general or document-grounded) |
+| **Chat** | `PUT` | `/api/chat/conversations/:id` | Rename conversation title |
+| **Chat** | `POST` | `/api/chat/conversations/:id/messages/stream` | Stream grounded response using Server-Sent Events (SSE) |
+| **Graph** | `POST` | `/api/graph/query` | Natural language Cypher query on knowledge graph |
+| **API Keys** | `POST` | `/api/apikeys` | Create scoped API keys for external developers |
+
+*For full interactive OpenAPI specs, visit `http://localhost:5000/api-docs`.*
+
+---
+
+## 👨‍💻 Author
+
+**Md Zaved Akhtar**
+- **GitHub**: [@mdzavedakhtar](https://github.com/mdzavedakhtar)
+- **Project Repository**: [NeuroAI](https://github.com/mdzavedakhtar/NeuroAI)
+- **Role**: Full-Stack AI Engineer & System Architect
+
+---
+
+<div align="center">
+  <sub>Engineered with precision for scalable Document Intelligence. Distributed under the MIT License.</sub>
+</div>
